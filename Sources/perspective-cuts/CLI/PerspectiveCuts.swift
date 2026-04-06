@@ -416,7 +416,8 @@ struct ToolKitActionDetail {
     let parameters: [ToolKitParameterDetail]
 }
 
-struct ToolKitReader: @unchecked Sendable {
+// @unchecked Sendable: db is opened read-only and used synchronously within each command.
+final class ToolKitReader: @unchecked Sendable {
     let db: OpaquePointer
 
     init(path: String) throws {
@@ -426,6 +427,10 @@ struct ToolKitReader: @unchecked Sendable {
             throw ValidationError("Cannot open ToolKit database at \(path)")
         }
         self.db = db
+    }
+
+    deinit {
+        sqlite3_close(db)
     }
 
     // MARK: - Action Detail
@@ -565,14 +570,15 @@ struct ToolKitReader: @unchecked Sendable {
             }()
             let sortOrder = Int(sqlite3_column_int64(stmt, 1))
 
-            // Read typeInstance blob to detect dynamic entities
+            // Detect dynamic entity params by checking the typeInstance protobuf blob.
+            // When an App Intent parameter is backed by a dynamic entity query, Apple embeds
+            // the full action identifier (e.g. "app.techopolis.Perspective-Actions.UseLocalModelIntent")
+            // in the blob. We match the full identifier to avoid false positives on short names.
             let isDynamic: Bool = {
                 let blobLen = sqlite3_column_bytes(stmt, 2)
                 guard blobLen > 50, let blobPtr = sqlite3_column_blob(stmt, 2) else { return false }
-                // Dynamic entity params have the action identifier embedded in the protobuf blob
                 let data = Data(bytes: blobPtr, count: Int(blobLen))
-                let intentName = actionIdentifier.split(separator: ".").last.map(String.init) ?? ""
-                return !intentName.isEmpty && data.range(of: Data(intentName.utf8)) != nil
+                return data.range(of: Data(actionIdentifier.utf8)) != nil
             }()
 
             let displayName: String? = {
@@ -611,6 +617,8 @@ struct ToolKitReader: @unchecked Sendable {
     }
 
     private func getTypeKind(typeId: String) -> Int {
+        // Note: Types.rowId is TEXT PRIMARY KEY in Apple's ToolKit schema (not the implicit integer rowid).
+        // Values are type identifiers like "string", "bool", "com.example.MyEntity", etc.
         var stmt: OpaquePointer?
         let query = "SELECT kind FROM Types WHERE rowId = ? LIMIT 1"
         guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return 1 }
