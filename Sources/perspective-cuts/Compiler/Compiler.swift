@@ -61,7 +61,7 @@ struct Compiler: Sendable {
                 // Emit the appropriate action based on expression type
                 let sourceAction: [String: Any]
                 if case .dictionaryLiteral = value {
-                    sourceAction = try buildDictionaryAction(from: value)
+                    sourceAction = try buildDictionaryAction(from: value, outputMap: outputMap)
                 } else {
                     sourceAction = try buildTextAction(from: value)
                 }
@@ -316,12 +316,12 @@ struct Compiler: Sendable {
         ]
     }
 
-    private func buildDictionaryAction(from expression: Expression) throws -> [String: Any] {
-        let value = try expressionToValue(expression)
+    private func buildDictionaryAction(from expression: Expression, outputMap: [String: OutputRef]) throws -> [String: Any] {
+        let value = try expressionToValueWithOutputMap(expression, outputMap: outputMap)
         let uuid = UUID().uuidString
         return buildAction(
             identifier: "is.workflow.actions.dictionary",
-            parameters: ["WFItems": value, "UUID": uuid]
+            parameters: ["WFItems": value, "UUID": uuid, "CustomOutputName": "Dictionary"]
         )
     }
 
@@ -424,11 +424,11 @@ struct Compiler: Sendable {
             ] as [String: Any]
         case .dictionaryLiteral(let entries):
             var items: [[String: Any]] = []
-            for (keyExpr, valueExpr) in entries {
+            for entry in entries {
                 var item: [String: Any] = [:]
-                item["WFKey"] = try expressionToValueWithOutputMap(keyExpr, outputMap: outputMap)
+                item["WFKey"] = try expressionToValueWithOutputMap(entry.key, outputMap: outputMap)
 
-                switch valueExpr {
+                switch entry.value {
                 case .numberLiteral(let n):
                     item["WFItemType"] = 3
                     let s = n == n.rounded() ? String(Int(n)) : String(n)
@@ -444,10 +444,10 @@ struct Compiler: Sendable {
                     ] as [String: Any]
                 case .dictionaryLiteral:
                     item["WFItemType"] = 1
-                    item["WFValue"] = try expressionToValueWithOutputMap(valueExpr, outputMap: outputMap)
+                    item["WFValue"] = try expressionToValueWithOutputMap(entry.value, outputMap: outputMap)
                 default:
                     item["WFItemType"] = 0
-                    item["WFValue"] = try expressionToValueWithOutputMap(valueExpr, outputMap: outputMap)
+                    item["WFValue"] = try expressionToValueWithOutputMap(entry.value, outputMap: outputMap)
                 }
                 items.append(item)
             }

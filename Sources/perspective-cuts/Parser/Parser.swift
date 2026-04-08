@@ -385,6 +385,9 @@ struct Parser: Sendable {
             pos += 1
             return .variableReference(name)
         case .leftBrace:
+            // Safe: block-level `{` is always consumed by statement parsers (if, repeat,
+            // for-each, menu, func) before reaching parseExpression, so `{` here is
+            // unambiguously a dictionary literal.
             return try parseDictionaryLiteral(&pos)
         default:
             throw ParserError(message: "Expected expression, got \(token.kind)", location: token.location)
@@ -394,7 +397,7 @@ struct Parser: Sendable {
     private func parseDictionaryLiteral(_ pos: inout Int) throws -> Expression {
         let loc = tokens[pos].location
         pos += 1 // skip {
-        var entries: [(key: Expression, value: Expression)] = []
+        var entries: [DictionaryEntry] = []
 
         skipNewlines(&pos)
         while pos < tokens.count && tokens[pos].kind != .rightBrace {
@@ -421,7 +424,7 @@ struct Parser: Sendable {
             skipNewlines(&pos)
 
             let value = try parseExpression(&pos)
-            entries.append((key: key, value: value))
+            entries.append(DictionaryEntry(key: key, value: value))
 
             skipNewlines(&pos)
             if pos < tokens.count && tokens[pos].kind == .comma {
