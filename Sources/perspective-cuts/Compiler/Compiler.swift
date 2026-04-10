@@ -142,6 +142,26 @@ struct Compiler: Sendable {
                                 resolvedValue = intVal
                             } else if let paramType = paramDef?.type, (paramType == "enum" || paramType == "boolean" || paramType == "plainString") {
                                 resolvedValue = try expressionToPlainValue(value)
+                            } else if let paramType = paramDef?.type, paramType == "variable",
+                                      case .variableReference(let varName) = value {
+                                // Variable-typed parameters need WFTextTokenAttachment,
+                                // not WFTextTokenString, so the action receives the
+                                // output directly rather than as interpolated text.
+                                if let ref = outputMap[varName] {
+                                    resolvedValue = [
+                                        "Value": [
+                                            "OutputUUID": ref.uuid,
+                                            "Type": "ActionOutput",
+                                            "OutputName": ref.name
+                                        ],
+                                        "WFSerializationType": "WFTextTokenAttachment"
+                                    ] as [String: Any]
+                                } else {
+                                    resolvedValue = [
+                                        "Value": ["VariableName": varName, "Type": "Variable"],
+                                        "WFSerializationType": "WFTextTokenAttachment"
+                                    ] as [String: Any]
+                                }
                             } else {
                                 resolvedValue = try expressionToValueWithOutputMap(value, outputMap: outputMap)
                             }
