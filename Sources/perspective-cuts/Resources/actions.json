@@ -1055,7 +1055,7 @@
       "description": "Run another shortcut",
       "parameters": {
         "name": {
-          "type": "string",
+          "type": "plainString",
           "required": true,
           "key": "WFWorkflowName"
         },
