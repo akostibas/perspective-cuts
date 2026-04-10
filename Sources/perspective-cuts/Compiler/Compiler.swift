@@ -481,22 +481,35 @@ struct Compiler: Sendable {
     private func applyCondition(_ condition: Condition, to params: inout [String: Any], outputMap: [String: OutputRef]) throws {
         // Helper: resolve the left-hand side of a condition.
         // Conditionals use a nested format for WFInput:
-        //   { Type: "Variable", Variable: { Value: { ... }, WFSerializationType: "WFTextTokenAttachment" } }
+        //   { Type: "Variable", Variable: { Value: { ..., Aggrandizements: [coerce to string] }, WFSerializationType: "WFTextTokenAttachment" } }
+        // The Aggrandizements coercion to WFStringContentItem is required
+        // so Shortcuts treats the value as a string before comparing.
         func resolveInput(_ expr: Expression) throws -> Any {
             if case .variableReference(let name) = expr {
+                let coercion: [[String: Any]] = [
+                    [
+                        "CoercionItemClass": "WFStringContentItem",
+                        "Type": "WFCoercionVariableAggrandizement"
+                    ]
+                ]
                 let inner: [String: Any]
                 if let ref = outputMap[name] {
                     inner = [
                         "Value": [
+                            "Aggrandizements": coercion,
                             "OutputUUID": ref.uuid,
                             "Type": "ActionOutput",
                             "OutputName": ref.name
-                        ],
+                        ] as [String: Any],
                         "WFSerializationType": "WFTextTokenAttachment"
                     ] as [String: Any]
                 } else {
                     inner = [
-                        "Value": ["VariableName": name, "Type": "Variable"],
+                        "Value": [
+                            "Aggrandizements": coercion,
+                            "VariableName": name,
+                            "Type": "Variable"
+                        ] as [String: Any],
                         "WFSerializationType": "WFTextTokenAttachment"
                     ] as [String: Any]
                 }
@@ -512,23 +525,23 @@ struct Compiler: Sendable {
         case .equals(let left, let right):
             params["WFInput"] = try resolveInput(left)
             params["WFCondition"] = 4 // equals
-            params["WFConditionalActionString"] = try expressionToValueWithOutputMap(right, outputMap: outputMap)
+            params["WFConditionalActionString"] = try expressionToPlainValue(right)
         case .notEquals(let left, let right):
             params["WFInput"] = try resolveInput(left)
             params["WFCondition"] = 5 // not equals
-            params["WFConditionalActionString"] = try expressionToValueWithOutputMap(right, outputMap: outputMap)
+            params["WFConditionalActionString"] = try expressionToPlainValue(right)
         case .contains(let left, let right):
             params["WFInput"] = try resolveInput(left)
             params["WFCondition"] = 99 // contains
-            params["WFConditionalActionString"] = try expressionToValueWithOutputMap(right, outputMap: outputMap)
+            params["WFConditionalActionString"] = try expressionToPlainValue(right)
         case .greaterThan(let left, let right):
             params["WFInput"] = try resolveInput(left)
             params["WFCondition"] = 2 // greater than
-            params["WFConditionalActionString"] = try expressionToValueWithOutputMap(right, outputMap: outputMap)
+            params["WFConditionalActionString"] = try expressionToPlainValue(right)
         case .lessThan(let left, let right):
             params["WFInput"] = try resolveInput(left)
             params["WFCondition"] = 3 // less than
-            params["WFConditionalActionString"] = try expressionToValueWithOutputMap(right, outputMap: outputMap)
+            params["WFConditionalActionString"] = try expressionToPlainValue(right)
         }
     }
 
