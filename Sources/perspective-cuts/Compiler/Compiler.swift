@@ -58,21 +58,53 @@ struct Compiler: Sendable {
                     parameters: ["WFCommentActionText": text]
                 ))
             case .variableDeclaration(let name, let value, _, _):
-                // Emit the appropriate action based on expression type
-                let sourceAction: [String: Any]
-                if case .dictionaryLiteral = value {
-                    sourceAction = try buildDictionaryAction(from: value, outputMap: outputMap)
+                // When the value is a bare variable reference, set directly without an intermediary action
+                if case .variableReference(let refName) = value {
+                    let wfInput: [String: Any]
+                    if let ref = outputMap[refName] {
+                        // Reference to an action output (-> varName)
+                        wfInput = [
+                            "Value": [
+                                "OutputUUID": ref.uuid,
+                                "Type": "ActionOutput",
+                                "OutputName": ref.name
+                            ] as [String: Any],
+                            "WFSerializationType": "WFTextTokenAttachment"
+                        ]
+                    } else {
+                        // Reference to a named variable (var varName = ...)
+                        wfInput = [
+                            "Value": [
+                                "VariableName": refName,
+                                "Type": "Variable"
+                            ] as [String: Any],
+                            "WFSerializationType": "WFTextTokenAttachment"
+                        ]
+                    }
+                    actions.append(buildAction(
+                        identifier: "is.workflow.actions.setvariable",
+                        parameters: [
+                            "WFVariableName": name,
+                            "WFInput": wfInput
+                        ]
+                    ))
                 } else {
-                    sourceAction = try buildTextAction(from: value)
+                    // For other expressions, emit a source action then set the variable to its output
+                    let sourceAction: [String: Any]
+                    if case .dictionaryLiteral = value {
+                        sourceAction = try buildDictionaryAction(from: value, outputMap: outputMap)
+                    } else {
+                        sourceAction = try buildTextAction(from: value)
+                    }
+                    actions.append(sourceAction)
+                    actions.append(buildAction(
+                        identifier: "is.workflow.actions.setvariable",
+                        parameters: [
+                            "WFVariableName": name,
+                            "WFInput": buildMagicVariable(outputOf: sourceAction)
+                        ]
+                    ))
                 }
-                actions.append(sourceAction)
-                actions.append(buildAction(
-                    identifier: "is.workflow.actions.setvariable",
-                    parameters: [
-                        "WFVariableName": name,
-                        "WFInput": buildMagicVariable(outputOf: sourceAction)
-                    ]
-                ))
             case .actionCall(let name, let arguments, let output, let location):
                 let def = registry.actions[name]
                 // If action contains dots, treat as raw identifier (3rd party app action)
