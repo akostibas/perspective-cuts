@@ -15,5 +15,10 @@ let package = Package(
             ],
             exclude: ["Resources"]
         ),
+        .testTarget(
+            name: "perspective-cutsTests",
+            dependencies: ["perspective-cuts"],
+            path: "Tests"
+        ),
     ]
 )

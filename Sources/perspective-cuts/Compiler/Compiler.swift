@@ -29,10 +29,11 @@ struct Compiler: Sendable {
 
     func compile(nodes: [ASTNode]) throws -> [String: Any] {
         var outputMap: [String: OutputRef] = [:]
-        return try compileWithOutputMap(nodes: nodes, outputMap: &outputMap)
+        var declaredVariables: Set<String> = []
+        return try compileWithOutputMap(nodes: nodes, outputMap: &outputMap, declaredVariables: &declaredVariables)
     }
 
-    private func compileWithOutputMap(nodes: [ASTNode], outputMap: inout [String: OutputRef]) throws -> [String: Any] {
+    private func compileWithOutputMap(nodes: [ASTNode], outputMap: inout [String: OutputRef], declaredVariables: inout Set<String>) throws -> [String: Any] {
         var actions: [[String: Any]] = []
         var shortcutName = "Perspective Shortcut"
         var iconColor = 463140863 // blue default
@@ -57,7 +58,8 @@ struct Compiler: Sendable {
                     identifier: "is.workflow.actions.comment",
                     parameters: ["WFCommentActionText": text]
                 ))
-            case .variableDeclaration(let name, let value, _, _):
+            case .variableDeclaration(let name, let value, _, let location):
+                try validateExpression(value, declaredVariables: declaredVariables, location: location)
                 // When the value is a bare variable reference, set directly without an intermediary action
                 if case .variableReference(let refName) = value {
                     let wfInput: [String: Any]
@@ -105,6 +107,7 @@ struct Compiler: Sendable {
                         ]
                     ))
                 }
+                declaredVariables.insert(name)
             case .actionCall(let name, let arguments, let output, let location):
                 let def = registry.actions[name]
                 // If action contains dots, treat as raw identifier (3rd party app action)
@@ -134,6 +137,7 @@ struct Compiler: Sendable {
                 }
 
                 for (label, value) in arguments {
+                    try validateExpression(value, declaredVariables: declaredVariables, location: location)
                     if let label {
                         let resolvedValue: Any
 
@@ -214,9 +218,11 @@ struct Compiler: Sendable {
                 // Track output for ActionOutput references
                 if let output {
                     outputMap[output] = OutputRef(uuid: uuid, name: output)
+                    declaredVariables.insert(output)
                 }
 
-            case .ifStatement(let condition, let thenBody, let elseBody, _):
+            case .ifStatement(let condition, let thenBody, let elseBody, let location):
+                try validateCondition(condition, declaredVariables: declaredVariables, location: location)
                 let groupID = UUID().uuidString
                 // Emit conditional start
                 var condParams: [String: Any] = ["GroupingIdentifier": groupID, "WFControlFlowMode": 0]
@@ -225,7 +231,7 @@ struct Compiler: Sendable {
 
                 // Emit then body
                 for bodyNode in thenBody {
-                    let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap)
+                    let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap, declaredVariables: &declaredVariables)
                     if let bodyActions = compiled["WFWorkflowActions"] as? [[String: Any]] {
                         actions.append(contentsOf: bodyActions)
                     }
@@ -238,7 +244,7 @@ struct Compiler: Sendable {
                         parameters: ["GroupingIdentifier": groupID, "WFControlFlowMode": 1]
                     ))
                     for bodyNode in elseBody {
-                        let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap)
+                        let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap, declaredVariables: &declaredVariables)
                         if let bodyActions = compiled["WFWorkflowActions"] as? [[String: Any]] {
                             actions.append(contentsOf: bodyActions)
                         }
@@ -259,7 +265,7 @@ struct Compiler: Sendable {
                     parameters: ["GroupingIdentifier": groupID, "WFControlFlowMode": 0, "WFRepeatCount": countValue]
                 ))
                 for bodyNode in body {
-                    let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap)
+                    let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap, declaredVariables: &declaredVariables)
                     if let bodyActions = compiled["WFWorkflowActions"] as? [[String: Any]] {
                         actions.append(contentsOf: bodyActions)
                     }
@@ -277,7 +283,7 @@ struct Compiler: Sendable {
                     parameters: ["GroupingIdentifier": groupID, "WFControlFlowMode": 0, "WFInput": collectionValue]
                 ))
                 for bodyNode in body {
-                    let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap)
+                    let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap, declaredVariables: &declaredVariables)
                     if let bodyActions = compiled["WFWorkflowActions"] as? [[String: Any]] {
                         actions.append(contentsOf: bodyActions)
                     }
@@ -309,7 +315,7 @@ struct Compiler: Sendable {
                         ]
                     ))
                     for bodyNode in menuCase.body {
-                        let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap)
+                        let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap, declaredVariables: &declaredVariables)
                         if let bodyActions = compiled["WFWorkflowActions"] as? [[String: Any]] {
                             actions.append(contentsOf: bodyActions)
                         }
@@ -574,6 +580,42 @@ struct Compiler: Sendable {
             params["WFInput"] = try resolveInput(left)
             params["WFCondition"] = 3 // less than
             params["WFConditionalActionString"] = try expressionToPlainValue(right)
+        }
+    }
+
+    // MARK: - Variable validation
+
+    private func validateExpression(_ expr: Expression, declaredVariables: Set<String>, location: SourceLocation) throws {
+        switch expr {
+        case .variableReference(let name):
+            if !declaredVariables.contains(name) {
+                throw CompilerError(message: "undefined variable '\(name)'", location: location)
+            }
+        case .interpolatedString(let parts):
+            for case .variable(let name) in parts {
+                if !declaredVariables.contains(name) {
+                    throw CompilerError(message: "undefined variable '\(name)'", location: location)
+                }
+            }
+        case .dictionaryLiteral(let entries):
+            for entry in entries {
+                try validateExpression(entry.key, declaredVariables: declaredVariables, location: location)
+                try validateExpression(entry.value, declaredVariables: declaredVariables, location: location)
+            }
+        default:
+            break
+        }
+    }
+
+    private func validateCondition(_ condition: Condition, declaredVariables: Set<String>, location: SourceLocation) throws {
+        switch condition {
+        case .equals(let left, let right),
+             .notEquals(let left, let right),
+             .contains(let left, let right),
+             .greaterThan(let left, let right),
+             .lessThan(let left, let right):
+            try validateExpression(left, declaredVariables: declaredVariables, location: location)
+            try validateExpression(right, declaredVariables: declaredVariables, location: location)
         }
     }
 
