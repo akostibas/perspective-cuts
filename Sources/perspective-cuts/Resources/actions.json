@@ -1168,12 +1168,17 @@
     },
     "exitShortcut": {
       "identifier": "is.workflow.actions.exit",
-      "description": "Stop and output a result",
+      "description": "Stop this shortcut without returning a result",
+      "parameters": {}
+    },
+    "outputShortcut": {
+      "identifier": "is.workflow.actions.output",
+      "description": "Stop and output a result to the caller",
       "parameters": {
         "result": {
-          "type": "variable",
-          "required": false,
-          "key": "WFResult"
+          "type": "string",
+          "required": true,
+          "key": "WFOutput"
         }
       }
     },
