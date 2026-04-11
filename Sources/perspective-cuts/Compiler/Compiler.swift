@@ -27,9 +27,23 @@ struct Compiler: Sendable {
         let name: String
     }
 
+    /// Name of the built-in variable that references the Shortcut Input
+    /// (the value passed to a shortcut via `runShortcut(input:)`).
+    static let shortcutInputName = "shortcutInput"
+
+    /// Returns true when `name` refers to the Shortcut Input magic variable.
+    private static func isShortcutInput(_ name: String) -> Bool {
+        name == shortcutInputName
+    }
+
+    /// Builds the ExtensionInput attachment dict used wherever shortcutInput appears.
+    private static func extensionInputAttachment() -> [String: Any] {
+        ["Type": "ExtensionInput"]
+    }
+
     func compile(nodes: [ASTNode]) throws -> [String: Any] {
         var outputMap: [String: OutputRef] = [:]
-        var declaredVariables: Set<String> = []
+        var declaredVariables: Set<String> = [Self.shortcutInputName]
         return try compileWithOutputMap(nodes: nodes, outputMap: &outputMap, declaredVariables: &declaredVariables)
     }
 
@@ -70,6 +84,13 @@ struct Compiler: Sendable {
                                 "OutputUUID": ref.uuid,
                                 "Type": "ActionOutput",
                                 "OutputName": ref.name
+                            ] as [String: Any],
+                            "WFSerializationType": "WFTextTokenAttachment"
+                        ]
+                    } else if Self.isShortcutInput(refName) {
+                        wfInput = [
+                            "Value": [
+                                "Type": "ExtensionInput"
                             ] as [String: Any],
                             "WFSerializationType": "WFTextTokenAttachment"
                         ]
@@ -190,6 +211,11 @@ struct Compiler: Sendable {
                                             "Type": "ActionOutput",
                                             "OutputName": ref.name
                                         ],
+                                        "WFSerializationType": "WFTextTokenAttachment"
+                                    ] as [String: Any]
+                                } else if Self.isShortcutInput(varName) {
+                                    resolvedValue = [
+                                        "Value": Self.extensionInputAttachment(),
                                         "WFSerializationType": "WFTextTokenAttachment"
                                     ] as [String: Any]
                                 } else {
@@ -445,11 +471,14 @@ struct Compiler: Sendable {
                     "WFSerializationType": "WFTextTokenString"
                 ] as [String: Any]
             }
+            let attachment: [String: Any] = Self.isShortcutInput(name)
+                ? Self.extensionInputAttachment()
+                : ["VariableName": name, "Type": "Variable"]
             return [
                 "Value": [
                     "string": "\u{FFFC}",
                     "attachmentsByRange": [
-                        "{0, 1}": ["VariableName": name, "Type": "Variable"]
+                        "{0, 1}": attachment
                     ]
                 ],
                 "WFSerializationType": "WFTextTokenString"
@@ -471,6 +500,8 @@ struct Compiler: Sendable {
                             "OutputUUID": ref.uuid,
                             "Type": "ActionOutput"
                         ]
+                    } else if Self.isShortcutInput(name) {
+                        attachments[range] = Self.extensionInputAttachment()
                     } else {
                         attachments[range] = ["VariableName": name, "Type": "Variable"]
                     }
@@ -538,6 +569,14 @@ struct Compiler: Sendable {
                             "OutputUUID": ref.uuid,
                             "Type": "ActionOutput",
                             "OutputName": ref.name
+                        ] as [String: Any],
+                        "WFSerializationType": "WFTextTokenAttachment"
+                    ] as [String: Any]
+                } else if Self.isShortcutInput(name) {
+                    inner = [
+                        "Value": [
+                            "Aggrandizements": coercion,
+                            "Type": "ExtensionInput"
                         ] as [String: Any],
                         "WFSerializationType": "WFTextTokenAttachment"
                     ] as [String: Any]
