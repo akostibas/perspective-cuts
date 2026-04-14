@@ -98,6 +98,20 @@ struct Parser: Sendable {
             return .fragmentMarker(location: loc)
         }
 
+        // #provides: var1, var2, var3
+        if key == "provides" {
+            pos += 1 // skip 'provides'
+            let vars = try parseCommaIdentifierList(&pos, directive: "provides", location: loc)
+            return .providesDeclaration(variables: vars, location: loc)
+        }
+
+        // #requires: var1, var2, var3
+        if key == "requires" {
+            pos += 1 // skip 'requires'
+            let vars = try parseCommaIdentifierList(&pos, directive: "requires", location: loc)
+            return .requiresDeclaration(variables: vars, location: loc)
+        }
+
         pos += 1
         guard pos < tokens.count, tokens[pos].kind == .colon else {
             throw ParserError(message: "Expected ':' after metadata key", location: tokens[pos].location)
@@ -514,6 +528,35 @@ struct Parser: Sendable {
             parts.append(.text(current))
         }
         return parts
+    }
+
+    /// Parses `: ident, ident, ident` after a directive keyword like `#provides` or `#requires`.
+    private func parseCommaIdentifierList(_ pos: inout Int, directive: String, location: SourceLocation) throws -> [String] {
+        guard pos < tokens.count, tokens[pos].kind == .colon else {
+            throw ParserError(message: "Expected ':' after '#\(directive)'", location: tokens[pos].location)
+        }
+        pos += 1 // skip :
+        var names: [String] = []
+        while pos < tokens.count {
+            switch tokens[pos].kind {
+            case .identifier(let name):
+                names.append(name)
+                pos += 1
+            case .comma:
+                pos += 1
+                continue
+            default:
+                break
+            }
+            if pos < tokens.count, case .comma = tokens[pos].kind {
+                continue
+            }
+            break
+        }
+        guard !names.isEmpty else {
+            throw ParserError(message: "Expected at least one variable name after '#\(directive):'", location: location)
+        }
+        return names
     }
 
     private func skipNewlines(_ pos: inout Int) {

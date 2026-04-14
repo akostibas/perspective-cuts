@@ -267,4 +267,404 @@ struct PreprocessorTests {
         #expect(actions.count == 2)
     }
 
+    // MARK: - Parser: #provides and #requires
+
+    @Test("Parser parses #provides directive")
+    func parseProvides() throws {
+        let nodes = try parse("#provides: apiKey, serverURL")
+        guard case .providesDeclaration(let vars, _) = nodes[0] else {
+            Issue.record("Expected providesDeclaration")
+            return
+        }
+        #expect(vars == ["apiKey", "serverURL"])
+    }
+
+    @Test("Parser parses #requires directive")
+    func parseRequires() throws {
+        let nodes = try parse("#requires: serverURL")
+        guard case .requiresDeclaration(let vars, _) = nodes[0] else {
+            Issue.record("Expected requiresDeclaration")
+            return
+        }
+        #expect(vars == ["serverURL"])
+    }
+
+    @Test("Parser errors on empty #provides")
+    func emptyProvides() throws {
+        #expect(throws: ParserError.self) {
+            _ = try parse("#provides:")
+        }
+    }
+
+    // MARK: - Dependency Validation
+
+    @Test("Satisfied #requires passes validation")
+    func satisfiedRequires() throws {
+        let dir = try makeTempDir(files: [
+            "config.perspective": """
+            #fragment
+            #provides: apiKey
+            var apiKey = "sk-123"
+            """,
+            "api.perspective": """
+            #fragment
+            #requires: apiKey
+            #provides: result
+            // uses apiKey
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("""
+        #include "config.perspective"
+        #include "api.perspective"
+        """)
+        // Should not throw
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        #expect(!result.isEmpty)
+    }
+
+    @Test("Main file var satisfies #requires")
+    func mainFileVarSatisfiesRequires() throws {
+        let dir = try makeTempDir(files: [
+            "frag.perspective": """
+            #fragment
+            #requires: serverURL
+            // uses serverURL
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("""
+        var serverURL = "https://example.com"
+        #include "frag.perspective"
+        """)
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        #expect(!result.isEmpty)
+    }
+
+    @Test("Main file -> capture satisfies #requires")
+    func mainFileOutputSatisfiesRequires() throws {
+        let dir = try makeTempDir(files: [
+            "frag.perspective": """
+            #fragment
+            #requires: data
+            // uses data
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("""
+        getBattery() -> data
+        #include "frag.perspective"
+        """)
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        #expect(!result.isEmpty)
+    }
+
+    @Test("Unsatisfied #requires produces error")
+    func unsatisfiedRequires() throws {
+        let dir = try makeTempDir(files: [
+            "frag.perspective": """
+            #fragment
+            #requires: missingVar
+            // needs missingVar
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("#include \"frag.perspective\"")
+        #expect(throws: PreprocessorError.self) {
+            _ = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        }
+    }
+
+    @Test("Duplicate #provides produces error")
+    func duplicateProvides() throws {
+        let dir = try makeTempDir(files: [
+            "a.perspective": """
+            #fragment
+            #provides: token
+            var token = "abc"
+            """,
+            "b.perspective": """
+            #fragment
+            #provides: token
+            var token = "xyz"
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("""
+        #include "a.perspective"
+        #include "b.perspective"
+        """)
+        #expect(throws: PreprocessorError.self) {
+            _ = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        }
+    }
+
+    // MARK: - Variable Auto-Prefixing
+
+    @Test("Fragment prefix derives camelCase from filename")
+    func fragmentPrefixDerivation() {
+        #expect(Preprocessor.fragmentPrefix(from: "config-loader.perspective") == "configLoader__")
+        #expect(Preprocessor.fragmentPrefix(from: "fragments/api-call.perspective") == "apiCall__")
+        #expect(Preprocessor.fragmentPrefix(from: "simple.perspective") == "simple__")
+        #expect(Preprocessor.fragmentPrefix(from: "a_b_c.perspective") == "aBC__")
+    }
+
+    @Test("Internal variables are prefixed")
+    func internalVarsPrefixed() throws {
+        let dir = try makeTempDir(files: [
+            "frag.perspective": """
+            #fragment
+            #provides: result
+            var temp = "working"
+            var result = "done"
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("#include \"frag.perspective\"")
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+
+        // temp should be prefixed, result should not
+        guard case .variableDeclaration(let name1, _, _, _) = result[0] else {
+            Issue.record("Expected var declaration")
+            return
+        }
+        guard case .variableDeclaration(let name2, _, _, _) = result[1] else {
+            Issue.record("Expected var declaration")
+            return
+        }
+        #expect(name1 == "frag__temp")
+        #expect(name2 == "result")
+    }
+
+    @Test("Action output captures are prefixed when internal")
+    func outputCapturesPrefixed() throws {
+        let dir = try makeTempDir(files: [
+            "frag.perspective": """
+            #fragment
+            #provides: finalResult
+            // internal capture gets prefixed
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let dir2 = try makeTempDir(files: [
+            "frag.perspective": """
+            #fragment
+            #provides: publicVar
+            getBattery() -> internalOutput
+            var publicVar = "done"
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir2) }
+
+        let mainNodes = try parse("#include \"frag.perspective\"")
+        let result = try Preprocessor(sourceDirectory: dir2).preprocess(nodes: mainNodes)
+
+        // getBattery() -> frag__internalOutput
+        guard case .actionCall(_, _, let output, _) = result[0] else {
+            Issue.record("Expected action call")
+            return
+        }
+        #expect(output == "frag__internalOutput")
+
+        // var publicVar = "done" (not prefixed)
+        guard case .variableDeclaration(let name, _, _, _) = result[1] else {
+            Issue.record("Expected var declaration")
+            return
+        }
+        #expect(name == "publicVar")
+    }
+
+    @Test("Variable references in expressions are prefixed")
+    func expressionReferencesPrefixed() throws {
+        let dir = try makeTempDir(files: [
+            "frag.perspective": """
+            #fragment
+            #provides: output
+            var temp = "hello"
+            var output = temp
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("#include \"frag.perspective\"")
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+
+        // var frag__temp = "hello"
+        guard case .variableDeclaration(let name1, _, _, _) = result[0] else {
+            Issue.record("Expected var declaration")
+            return
+        }
+        #expect(name1 == "frag__temp")
+
+        // var output = frag__temp  (reference should be prefixed)
+        guard case .variableDeclaration(let name2, let value, _, _) = result[1] else {
+            Issue.record("Expected var declaration")
+            return
+        }
+        #expect(name2 == "output")
+        guard case .variableReference(let ref) = value else {
+            Issue.record("Expected variable reference")
+            return
+        }
+        #expect(ref == "frag__temp")
+    }
+
+    @Test("Interpolated string variable references are prefixed")
+    func interpolationReferencesPrefixed() throws {
+        let dir = try makeTempDir(files: [
+            "frag.perspective": """
+            #fragment
+            #provides: msg
+            var temp = "world"
+            var msg = "hello \\(temp)"
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("#include \"frag.perspective\"")
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+
+        guard case .variableDeclaration(_, let value, _, _) = result[1] else {
+            Issue.record("Expected var declaration")
+            return
+        }
+        guard case .interpolatedString(let parts) = value else {
+            Issue.record("Expected interpolated string")
+            return
+        }
+        // Should have text "hello " and variable "frag__temp"
+        guard case .variable(let varName) = parts[1] else {
+            Issue.record("Expected variable part")
+            return
+        }
+        #expect(varName == "frag__temp")
+    }
+
+    @Test("For-each loop variables are NOT prefixed")
+    func loopVarsExempt() throws {
+        let dir = try makeTempDir(files: [
+            "frag.perspective": """
+            #fragment
+            #requires: items
+            #provides: count
+            var count = 0
+            for item in items {
+                var count = 0
+            }
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("""
+        getBattery() -> items
+        #include "frag.perspective"
+        """)
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+
+        // Find the for-each loop node
+        let forNode = result.first(where: { if case .forEachLoop = $0 { return true } else { return false } })
+        guard case .forEachLoop(let itemName, _, _, _) = forNode else {
+            Issue.record("Expected forEachLoop")
+            return
+        }
+        #expect(itemName == "item") // NOT frag__item
+    }
+
+    @Test("Requires variables are NOT prefixed in references")
+    func requiresVarsNotPrefixed() throws {
+        let dir = try makeTempDir(files: [
+            "frag.perspective": """
+            #fragment
+            #requires: apiKey
+            #provides: result
+            var result = apiKey
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("""
+        var apiKey = "sk-123"
+        #include "frag.perspective"
+        """)
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+
+        // The fragment's "var result = apiKey" — apiKey should NOT be prefixed
+        let fragVarNode = result.last!
+        guard case .variableDeclaration(let name, let value, _, _) = fragVarNode else {
+            Issue.record("Expected var declaration")
+            return
+        }
+        #expect(name == "result")
+        guard case .variableReference(let ref) = value else {
+            Issue.record("Expected variable reference")
+            return
+        }
+        #expect(ref == "apiKey") // NOT frag__apiKey
+    }
+
+    @Test("Fragments without contracts are NOT prefixed")
+    func noContractsNoPrefixing() throws {
+        let dir = try makeTempDir(files: [
+            "simple.perspective": """
+            #fragment
+            var temp = "hello"
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("#include \"simple.perspective\"")
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+
+        guard case .variableDeclaration(let name, _, _, _) = result[0] else {
+            Issue.record("Expected var declaration")
+            return
+        }
+        #expect(name == "temp") // NOT prefixed since no #provides/#requires
+    }
+
+    // MARK: - End-to-End: Phase 2 with Compilation
+
+    @Test("Auto-prefixed fragment compiles correctly")
+    func prefixedFragmentCompiles() throws {
+        let dir = try makeTempDir(files: [
+            "frag.perspective": """
+            #fragment
+            #provides: greeting
+            var temp = "world"
+            var greeting = "hello"
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let source = """
+        #name: Test
+        #include "frag.perspective"
+        """
+        let tokens = try Lexer(source: source).tokenize()
+        let parsed = try Parser(tokens: tokens).parse()
+        let preprocessed = try Preprocessor(sourceDirectory: dir).preprocess(nodes: parsed)
+
+        let registry = ActionRegistry(actions: [:], controlFlow: [:], iconColors: [:])
+        let result = try Compiler(registry: registry).compile(nodes: preprocessed)
+
+        let actions = result["WFWorkflowActions"] as! [[String: Any]]
+        // temp: text + setvariable, greeting: text + setvariable = 4 actions
+        #expect(actions.count == 4)
+
+        // First setvariable should use prefixed name "frag__temp"
+        let firstSetVar = actions[1]["WFWorkflowActionParameters"] as! [String: Any]
+        #expect(firstSetVar["WFVariableName"] as? String == "frag__temp")
+
+        // Second setvariable should use unprefixed "greeting"
+        let secondSetVar = actions[3]["WFWorkflowActionParameters"] as! [String: Any]
+        #expect(secondSetVar["WFVariableName"] as? String == "greeting")
+    }
+
 } // end PreprocessorTests

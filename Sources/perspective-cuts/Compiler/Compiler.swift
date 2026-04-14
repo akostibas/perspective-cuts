@@ -402,6 +402,10 @@ struct Compiler: Sendable {
                 throw CompilerError(message: "#include directives must be resolved by the preprocessor before compilation", location: location)
             case .fragmentMarker(let location):
                 throw CompilerError(message: "#fragment markers must be resolved by the preprocessor before compilation", location: location)
+            case .providesDeclaration(_, let location):
+                throw CompilerError(message: "#provides declarations must be resolved by the preprocessor before compilation", location: location)
+            case .requiresDeclaration(_, let location):
+                throw CompilerError(message: "#requires declarations must be resolved by the preprocessor before compilation", location: location)
             }
         }
 
