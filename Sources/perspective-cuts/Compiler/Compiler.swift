@@ -397,6 +397,11 @@ struct Compiler: Sendable {
             case .functionDeclaration, .returnStatement:
                 // Functions are inlined at call sites (macro-style for now)
                 break
+
+            case .includeDirective(_, let location):
+                throw CompilerError(message: "#include directives must be resolved by the preprocessor before compilation", location: location)
+            case .fragmentMarker(let location):
+                throw CompilerError(message: "#fragment markers must be resolved by the preprocessor before compilation", location: location)
             }
         }
 

@@ -81,6 +81,23 @@ struct Parser: Sendable {
         guard pos < tokens.count, case .identifier(let key) = tokens[pos].kind else {
             throw ParserError(message: "Expected metadata key after '#'", location: loc)
         }
+
+        // #include "path"
+        if key == "include" {
+            pos += 1 // skip 'include'
+            guard pos < tokens.count, case .stringLiteral(let path) = tokens[pos].kind else {
+                throw ParserError(message: "Expected string path after '#include'", location: tokens[pos].location)
+            }
+            pos += 1
+            return .includeDirective(path: path, location: loc)
+        }
+
+        // #fragment
+        if key == "fragment" {
+            pos += 1 // skip 'fragment'
+            return .fragmentMarker(location: loc)
+        }
+
         pos += 1
         guard pos < tokens.count, tokens[pos].kind == .colon else {
             throw ParserError(message: "Expected ':' after metadata key", location: tokens[pos].location)

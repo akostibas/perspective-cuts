@@ -33,13 +33,18 @@ struct Compile: ParsableCommand {
     func run() throws {
         let source = try readSource(file)
         let tokens = try Lexer(source: source).tokenize()
-        let nodes = try Parser(tokens: tokens).parse()
+        let parsedNodes = try Parser(tokens: tokens).parse()
+
+        // Resolve #include directives before compilation
+        let inputURL = URL(fileURLWithPath: file)
+        let sourceDir = inputURL.deletingLastPathComponent()
+        let nodes = try Preprocessor(sourceDirectory: sourceDir).preprocess(nodes: parsedNodes)
+
         let registry = try ActionRegistry.load()
         let toolKitReader = try? Self.openToolKitDB()
         let plist = try Compiler(registry: registry, toolKitReader: toolKitReader).compile(nodes: nodes)
 
         // Determine output path
-        let inputURL = URL(fileURLWithPath: file)
         let baseName = inputURL.deletingPathExtension().lastPathComponent
         let outputPath = output ?? "\(baseName).shortcut"
         let outputURL = URL(fileURLWithPath: outputPath)
@@ -156,7 +161,11 @@ struct Validate: ParsableCommand {
         }
         let source = try String(contentsOf: url, encoding: .utf8)
         let tokens = try Lexer(source: source).tokenize()
-        let nodes = try Parser(tokens: tokens).parse()
+        let parsedNodes = try Parser(tokens: tokens).parse()
+
+        // Resolve #include directives before validation
+        let sourceDir = url.deletingLastPathComponent()
+        let nodes = try Preprocessor(sourceDirectory: sourceDir).preprocess(nodes: parsedNodes)
 
         // Validate action names against registry
         let registry = try ActionRegistry.load()

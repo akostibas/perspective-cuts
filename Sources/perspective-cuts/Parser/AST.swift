@@ -18,6 +18,9 @@ enum ASTNode: Sendable {
 
     case functionDeclaration(name: String, body: [ASTNode], location: SourceLocation)
     case returnStatement(value: Expression?, location: SourceLocation)
+
+    case includeDirective(path: String, location: SourceLocation)
+    case fragmentMarker(location: SourceLocation)
 }
 
 struct DictionaryEntry: Sendable {
