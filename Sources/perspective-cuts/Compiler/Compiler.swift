@@ -41,13 +41,20 @@ struct Compiler: Sendable {
         ["Type": "ExtensionInput"]
     }
 
+    /// Maps user-chosen for-each loop variable names to the Shortcuts
+    /// runtime name "Repeat Item".
+    private static func resolveVariableName(_ name: String, forEachVars: Set<String>) -> String {
+        forEachVars.contains(name) ? "Repeat Item" : name
+    }
+
     func compile(nodes: [ASTNode]) throws -> [String: Any] {
         var outputMap: [String: OutputRef] = [:]
         var declaredVariables: Set<String> = [Self.shortcutInputName]
-        return try compileWithOutputMap(nodes: nodes, outputMap: &outputMap, declaredVariables: &declaredVariables)
+        var forEachVarNames: Set<String> = []
+        return try compileWithOutputMap(nodes: nodes, outputMap: &outputMap, declaredVariables: &declaredVariables, forEachVarNames: &forEachVarNames)
     }
 
-    private func compileWithOutputMap(nodes: [ASTNode], outputMap: inout [String: OutputRef], declaredVariables: inout Set<String>) throws -> [String: Any] {
+    private func compileWithOutputMap(nodes: [ASTNode], outputMap: inout [String: OutputRef], declaredVariables: inout Set<String>, forEachVarNames: inout Set<String>) throws -> [String: Any] {
         var actions: [[String: Any]] = []
         var shortcutName = "Perspective Shortcut"
         var iconColor = 463140863 // blue default
@@ -95,10 +102,10 @@ struct Compiler: Sendable {
                             "WFSerializationType": "WFTextTokenAttachment"
                         ]
                     } else {
-                        // Reference to a named variable (var varName = ...)
+                        // Reference to a named variable (var varName = ...) or for-each loop variable
                         wfInput = [
                             "Value": [
-                                "VariableName": refName,
+                                "VariableName": Self.resolveVariableName(refName, forEachVars: forEachVarNames),
                                 "Type": "Variable"
                             ] as [String: Any],
                             "WFSerializationType": "WFTextTokenAttachment"
@@ -115,7 +122,7 @@ struct Compiler: Sendable {
                     // For other expressions, emit a source action then set the variable to its output
                     let sourceAction: [String: Any]
                     if case .dictionaryLiteral = value {
-                        sourceAction = try buildDictionaryAction(from: value, outputMap: outputMap)
+                        sourceAction = try buildDictionaryAction(from: value, outputMap: outputMap, forEachVarNames: forEachVarNames)
                     } else {
                         sourceAction = try buildTextAction(from: value)
                     }
@@ -220,17 +227,22 @@ struct Compiler: Sendable {
                                     ] as [String: Any]
                                 } else {
                                     resolvedValue = [
-                                        "Value": ["VariableName": varName, "Type": "Variable"],
+                                        "Value": ["VariableName": Self.resolveVariableName(varName, forEachVars: forEachVarNames), "Type": "Variable"],
                                         "WFSerializationType": "WFTextTokenAttachment"
                                     ] as [String: Any]
                                 }
                             } else {
-                                resolvedValue = try expressionToValueWithOutputMap(value, outputMap: outputMap)
+                                resolvedValue = try expressionToValueWithOutputMap(value, outputMap: outputMap, forEachVarNames: forEachVarNames)
                             }
 
                             // For built-in actions, map friendly name to plist key
                             let plistKey = paramDef?.key ?? label
                             params[plistKey] = resolvedValue
+                            // runShortcut needs both WFWorkflowName and WFWorkflow
+                            // for dynamic shortcut name resolution at runtime
+                            if plistKey == "WFWorkflowName" {
+                                params["WFWorkflow"] = resolvedValue
+                            }
                             continue
                         }
 
@@ -252,12 +264,12 @@ struct Compiler: Sendable {
                 let groupID = UUID().uuidString
                 // Emit conditional start
                 var condParams: [String: Any] = ["GroupingIdentifier": groupID, "WFControlFlowMode": 0]
-                try applyCondition(condition, to: &condParams, outputMap: outputMap)
+                try applyCondition(condition, to: &condParams, outputMap: outputMap, forEachVarNames: forEachVarNames)
                 actions.append(buildAction(identifier: "is.workflow.actions.conditional", parameters: condParams))
 
                 // Emit then body
                 for bodyNode in thenBody {
-                    let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap, declaredVariables: &declaredVariables)
+                    let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap, declaredVariables: &declaredVariables, forEachVarNames: &forEachVarNames)
                     if let bodyActions = compiled["WFWorkflowActions"] as? [[String: Any]] {
                         actions.append(contentsOf: bodyActions)
                     }
@@ -270,7 +282,7 @@ struct Compiler: Sendable {
                         parameters: ["GroupingIdentifier": groupID, "WFControlFlowMode": 1]
                     ))
                     for bodyNode in elseBody {
-                        let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap, declaredVariables: &declaredVariables)
+                        let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap, declaredVariables: &declaredVariables, forEachVarNames: &forEachVarNames)
                         if let bodyActions = compiled["WFWorkflowActions"] as? [[String: Any]] {
                             actions.append(contentsOf: bodyActions)
                         }
@@ -291,7 +303,7 @@ struct Compiler: Sendable {
                     parameters: ["GroupingIdentifier": groupID, "WFControlFlowMode": 0, "WFRepeatCount": countValue]
                 ))
                 for bodyNode in body {
-                    let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap, declaredVariables: &declaredVariables)
+                    let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap, declaredVariables: &declaredVariables, forEachVarNames: &forEachVarNames)
                     if let bodyActions = compiled["WFWorkflowActions"] as? [[String: Any]] {
                         actions.append(contentsOf: bodyActions)
                     }
@@ -301,15 +313,45 @@ struct Compiler: Sendable {
                     parameters: ["GroupingIdentifier": groupID, "WFControlFlowMode": 2]
                 ))
 
-            case .forEachLoop(_, let collection, let body, _):
+            case .forEachLoop(let itemName, let collection, let body, _):
                 let groupID = UUID().uuidString
-                let collectionValue = try expressionToValue(collection)
+                // WFInput for repeat-each needs WFTextTokenAttachment (direct
+                // variable reference), not WFTextTokenString.
+                let collectionValue: Any
+                if case .variableReference(let varName) = collection {
+                    if let ref = outputMap[varName] {
+                        collectionValue = [
+                            "Value": [
+                                "OutputUUID": ref.uuid,
+                                "Type": "ActionOutput",
+                                "OutputName": ref.name
+                            ],
+                            "WFSerializationType": "WFTextTokenAttachment"
+                        ] as [String: Any]
+                    } else if Self.isShortcutInput(varName) {
+                        collectionValue = [
+                            "Value": Self.extensionInputAttachment(),
+                            "WFSerializationType": "WFTextTokenAttachment"
+                        ] as [String: Any]
+                    } else {
+                        collectionValue = [
+                            "Value": ["VariableName": Self.resolveVariableName(varName, forEachVars: forEachVarNames), "Type": "Variable"],
+                            "WFSerializationType": "WFTextTokenAttachment"
+                        ] as [String: Any]
+                    }
+                } else {
+                    collectionValue = try expressionToValueWithOutputMap(collection, outputMap: outputMap, forEachVarNames: forEachVarNames)
+                }
                 actions.append(buildAction(
                     identifier: "is.workflow.actions.repeat.each",
                     parameters: ["GroupingIdentifier": groupID, "WFControlFlowMode": 0, "WFInput": collectionValue]
                 ))
+                // Declare the loop variable so it can be referenced in the body.
+                // Shortcuts always calls this "Repeat Item" at runtime.
+                declaredVariables.insert(itemName)
+                forEachVarNames.insert(itemName)
                 for bodyNode in body {
-                    let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap, declaredVariables: &declaredVariables)
+                    let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap, declaredVariables: &declaredVariables, forEachVarNames: &forEachVarNames)
                     if let bodyActions = compiled["WFWorkflowActions"] as? [[String: Any]] {
                         actions.append(contentsOf: bodyActions)
                     }
@@ -341,7 +383,7 @@ struct Compiler: Sendable {
                         ]
                     ))
                     for bodyNode in menuCase.body {
-                        let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap, declaredVariables: &declaredVariables)
+                        let compiled = try compileWithOutputMap(nodes: [bodyNode], outputMap: &outputMap, declaredVariables: &declaredVariables, forEachVarNames: &forEachVarNames)
                         if let bodyActions = compiled["WFWorkflowActions"] as? [[String: Any]] {
                             actions.append(contentsOf: bodyActions)
                         }
@@ -400,8 +442,8 @@ struct Compiler: Sendable {
         ]
     }
 
-    private func buildDictionaryAction(from expression: Expression, outputMap: [String: OutputRef]) throws -> [String: Any] {
-        let value = try expressionToValueWithOutputMap(expression, outputMap: outputMap)
+    private func buildDictionaryAction(from expression: Expression, outputMap: [String: OutputRef], forEachVarNames: Set<String> = []) throws -> [String: Any] {
+        let value = try expressionToValueWithOutputMap(expression, outputMap: outputMap, forEachVarNames: forEachVarNames)
         let uuid = UUID().uuidString
         return buildAction(
             identifier: "is.workflow.actions.dictionary",
@@ -445,7 +487,7 @@ struct Compiler: Sendable {
         return try expressionToValueWithOutputMap(expr, outputMap: [:])
     }
 
-    private func expressionToValueWithOutputMap(_ expr: Expression, outputMap: [String: OutputRef]) throws -> Any {
+    private func expressionToValueWithOutputMap(_ expr: Expression, outputMap: [String: OutputRef], forEachVarNames: Set<String> = []) throws -> Any {
         switch expr {
         case .stringLiteral(let s):
             return [
@@ -473,7 +515,7 @@ struct Compiler: Sendable {
             }
             let attachment: [String: Any] = Self.isShortcutInput(name)
                 ? Self.extensionInputAttachment()
-                : ["VariableName": name, "Type": "Variable"]
+                : ["VariableName": Self.resolveVariableName(name, forEachVars: forEachVarNames), "Type": "Variable"]
             return [
                 "Value": [
                     "string": "\u{FFFC}",
@@ -503,7 +545,7 @@ struct Compiler: Sendable {
                     } else if Self.isShortcutInput(name) {
                         attachments[range] = Self.extensionInputAttachment()
                     } else {
-                        attachments[range] = ["VariableName": name, "Type": "Variable"]
+                        attachments[range] = ["VariableName": Self.resolveVariableName(name, forEachVars: forEachVarNames), "Type": "Variable"]
                     }
                 }
             }
@@ -515,7 +557,7 @@ struct Compiler: Sendable {
             var items: [[String: Any]] = []
             for entry in entries {
                 var item: [String: Any] = [:]
-                item["WFKey"] = try expressionToValueWithOutputMap(entry.key, outputMap: outputMap)
+                item["WFKey"] = try expressionToValueWithOutputMap(entry.key, outputMap: outputMap, forEachVarNames: forEachVarNames)
 
                 switch entry.value {
                 case .numberLiteral(let n):
@@ -533,10 +575,10 @@ struct Compiler: Sendable {
                     ] as [String: Any]
                 case .dictionaryLiteral:
                     item["WFItemType"] = 1
-                    item["WFValue"] = try expressionToValueWithOutputMap(entry.value, outputMap: outputMap)
+                    item["WFValue"] = try expressionToValueWithOutputMap(entry.value, outputMap: outputMap, forEachVarNames: forEachVarNames)
                 default:
                     item["WFItemType"] = 0
-                    item["WFValue"] = try expressionToValueWithOutputMap(entry.value, outputMap: outputMap)
+                    item["WFValue"] = try expressionToValueWithOutputMap(entry.value, outputMap: outputMap, forEachVarNames: forEachVarNames)
                 }
                 items.append(item)
             }
@@ -547,7 +589,7 @@ struct Compiler: Sendable {
         }
     }
 
-    private func applyCondition(_ condition: Condition, to params: inout [String: Any], outputMap: [String: OutputRef]) throws {
+    private func applyCondition(_ condition: Condition, to params: inout [String: Any], outputMap: [String: OutputRef], forEachVarNames: Set<String> = []) throws {
         // Helper: resolve the left-hand side of a condition.
         // Conditionals use a nested format for WFInput:
         //   { Type: "Variable", Variable: { Value: { ..., Aggrandizements: [coerce to string] }, WFSerializationType: "WFTextTokenAttachment" } }
@@ -584,7 +626,7 @@ struct Compiler: Sendable {
                     inner = [
                         "Value": [
                             "Aggrandizements": coercion,
-                            "VariableName": name,
+                            "VariableName": Self.resolveVariableName(name, forEachVars: forEachVarNames),
                             "Type": "Variable"
                         ] as [String: Any],
                         "WFSerializationType": "WFTextTokenAttachment"
@@ -595,7 +637,7 @@ struct Compiler: Sendable {
                     "Variable": inner
                 ] as [String: Any]
             }
-            return try expressionToValueWithOutputMap(expr, outputMap: outputMap)
+            return try expressionToValueWithOutputMap(expr, outputMap: outputMap, forEachVarNames: forEachVarNames)
         }
 
         switch condition {
