@@ -336,6 +336,8 @@ For third party apps, use the full identifier with dots: `com.openai.chat.AskInt
 
 The `case` keyword is reserved. The `changeCase` action cannot be used until the parser is updated. Use `useModel` as a workaround.
 
+For multi-file shortcuts, use `#include "path/to/fragment.perspective"` to inline other files. Mark non-standalone files with `#fragment`. Include paths are relative to the including file. The compiler strips imports and metadata from included files automatically.
+
 Compile with `perspective-cuts compile --sign file.perspective`. Always use `--sign` for importable shortcuts.
 
 ## Tutorials
@@ -560,6 +562,62 @@ getWiFiNetwork() -> wifi
 getDeviceDetail(detail: "Device Name") -> device
 showResult(text: "Device: \(device)\nIP: \(ip)\nWi-Fi: \(wifi)")
 ```
+
+## Fragment Composition
+
+Perspective supports splitting shortcuts across multiple files using `#include`. This lets you break large shortcuts into smaller, independently testable pieces and compose them into a single compiled shortcut.
+
+### Basic Include
+
+```
+import Shortcuts
+#name: My Shortcut
+
+#include "fragments/config-loader.perspective"
+#include "fragments/main-loop.perspective"
+```
+
+The compiler resolves `#include` directives at compile time. It reads the referenced file, strips any `import Shortcuts` statements and metadata (`#name`, `#color`, `#icon`), and inlines the remaining actions at the include site. The result is a single flat shortcut.
+
+Include paths are resolved relative to the including file's directory. If your main file is at `project/main.perspective` and it includes `"fragments/helper.perspective"`, the compiler looks for `project/fragments/helper.perspective`.
+
+### Fragment Files
+
+Mark a file with `#fragment` to indicate it is not intended to compile standalone:
+
+```
+#fragment
+// config-loader.perspective
+
+var apiKey = "sk-..."
+var serverURL = "https://api.example.com"
+```
+
+`#fragment` is documentation for the author. The compiler will error if you try to compile a `#fragment` file directly (`perspective compile fragments/config-loader.perspective`), but `#include` works on any `.perspective` file — fragment or not. You can include a standalone shortcut into another without editing it.
+
+### Multiple Fragments
+
+Fragments are inlined in order. Variables and action outputs from earlier includes are available to later ones:
+
+```
+import Shortcuts
+#name: Composed Shortcut
+
+#include "fragments/config.perspective"
+// config.perspective sets var apiKey, var serverURL
+
+#include "fragments/api-call.perspective"
+// api-call.perspective can reference apiKey and serverURL
+```
+
+### What Gets Stripped
+
+When a file is included, the compiler removes:
+- `import Shortcuts` statements
+- All metadata directives (`#name`, `#color`, `#icon`)
+- `#fragment` markers
+
+Everything else — actions, variables, comments, control flow — is inlined as-is.
 
 ## Understanding Variables
 

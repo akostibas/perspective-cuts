@@ -23,6 +23,7 @@ Other tools existed for writing shortcuts as code. JellyCuts was the main one. B
 - Apple Intelligence with Private Cloud Compute and on-device models
 - Translation to 21 languages
 - Control flow (if/else, repeat, for-each, menu)
+- Fragment composition (`#include`) for multi-file shortcuts
 - Compiles to signed `.shortcut` files that work on macOS, iOS, and iPadOS
 - `discover` command to find actions from any installed app
 
