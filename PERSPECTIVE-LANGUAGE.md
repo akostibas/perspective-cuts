@@ -336,7 +336,7 @@ For third party apps, use the full identifier with dots: `com.openai.chat.AskInt
 
 The `case` keyword is reserved. The `changeCase` action cannot be used until the parser is updated. Use `useModel` as a workaround.
 
-For multi-file shortcuts, use `#include "path/to/fragment.perspective"` to inline other files. Mark non-standalone files with `#fragment`. Include paths are relative to the including file. The compiler strips imports and metadata from included files automatically.
+For multi-file shortcuts, use `#include "path/to/fragment.perspective"` to inline other files. Mark non-standalone files with `#fragment`. Include paths are relative to the including file. The compiler strips imports and metadata from included files automatically. Use `#provides: var1, var2` and `#requires: var1` to declare fragment contracts — the compiler validates dependencies and auto-prefixes internal variables to prevent collisions.
 
 Compile with `perspective-cuts compile --sign file.perspective`. Always use `--sign` for importable shortcuts.
 
@@ -610,14 +610,58 @@ import Shortcuts
 // api-call.perspective can reference apiKey and serverURL
 ```
 
+### Dependency Contracts: `#provides` and `#requires`
+
+Fragments can declare what variables they export and depend on:
+
+```
+// fragments/config-loader.perspective
+#fragment
+#provides: apiKey, serverURL, deviceId
+
+var apiKey = "sk-..."
+var serverURL = "https://api.example.com"
+getDeviceDetail(detail: "Device Name") -> deviceId
+```
+
+```
+// fragments/session-setup.perspective
+#fragment
+#requires: serverURL
+#provides: sessionId
+
+var temp = "working..."
+// ... uses serverURL, sets sessionId ...
+var sessionId = "abc-123"
+```
+
+The compiler validates that every `#requires` variable is in scope at the include site — whether from an earlier fragment's `#provides`, a `var` declaration in the main file, or a `->` capture in the main file.
+
+Two fragments providing the same variable name is a compile error.
+
+### Variable Auto-Prefixing
+
+When a fragment declares `#provides` or `#requires`, all variables NOT listed in those declarations are considered internal. The compiler rewrites internal variable names with a prefix derived from the filename to prevent collisions between fragments.
+
+For example, if `config-loader.perspective` has an internal `var temp`, it becomes `configLoader__temp` in the compiled output. Provided variables like `apiKey` keep their original names.
+
+This means fragment authors write natural code without worrying about namespace collisions. Two fragments can both use `var temp` internally and they will not conflict.
+
+Variables exempt from prefixing:
+- Variables listed in `#provides` (they are the public API)
+- Variables listed in `#requires` (they come from outside the fragment)
+- For-each loop iterator variables (they map to Shortcuts' "Repeat Item" at runtime)
+
+Fragments without any `#provides` or `#requires` declarations are not prefixed. This keeps simple fragments and included standalone files working as-is.
+
 ### What Gets Stripped
 
 When a file is included, the compiler removes:
 - `import Shortcuts` statements
 - All metadata directives (`#name`, `#color`, `#icon`)
-- `#fragment` markers
+- `#fragment`, `#provides`, and `#requires` declarations
 
-Everything else — actions, variables, comments, control flow — is inlined as-is.
+Everything else — actions, variables, comments, control flow — is inlined (with auto-prefixing applied if the fragment has contracts).
 
 ## Understanding Variables
 
