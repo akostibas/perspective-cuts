@@ -33,60 +33,26 @@ struct StandaloneAnalyzer {
 
     func analyze(nodes: [ASTNode]) -> [Diagnostic] {
         var diagnostics: [Diagnostic] = []
-        walk(nodes: nodes, branchContext: nil, diagnostics: &diagnostics)
-        return diagnostics
-    }
-
-    // MARK: - Private
-
-    private func walk(nodes: [ASTNode], branchContext: String?, diagnostics: inout [Diagnostic]) {
-        for node in nodes {
-            switch node {
-            case .actionCall(let name, let arguments, _, let location):
-                // Dotted names are 3rd-party app actions
-                if name.contains(".") {
-                    diagnostics.append(Diagnostic(
-                        dependency: .thirdPartyApp(identifier: name),
-                        location: location,
-                        branchContext: branchContext
-                    ))
-                }
-                // runShortcut depends on another shortcut
-                if name == "runShortcut" {
-                    let shortcutName = extractShortcutName(from: arguments)
-                    diagnostics.append(Diagnostic(
-                        dependency: .shortcut(name: shortcutName),
-                        location: location,
-                        branchContext: branchContext
-                    ))
-                }
-
-            case .ifStatement(let condition, let thenBody, let elseBody, _):
-                let condStr = describeCondition(condition)
-                walk(nodes: thenBody, branchContext: composeContext(branchContext, "when \(condStr)"), diagnostics: &diagnostics)
-                if let elseBody {
-                    walk(nodes: elseBody, branchContext: composeContext(branchContext, "when not (\(condStr))"), diagnostics: &diagnostics)
-                }
-
-            case .menu(let title, let cases, _):
-                for menuCase in cases {
-                    let caseContext = "in menu \"\(title)\" case \"\(menuCase.label)\""
-                    walk(nodes: menuCase.body, branchContext: composeContext(branchContext, caseContext), diagnostics: &diagnostics)
-                }
-
-            case .repeatLoop(_, let body, _):
-                walk(nodes: body, branchContext: branchContext, diagnostics: &diagnostics)
-
-            case .forEachLoop(_, _, let body, _):
-                walk(nodes: body, branchContext: branchContext, diagnostics: &diagnostics)
-
-            case .functionDeclaration(_, let body, _):
-                walk(nodes: body, branchContext: branchContext, diagnostics: &diagnostics)
-
-            default:
-                break
+        ASTWalker.walk(nodes: nodes) { visit in
+            // Dotted names are 3rd-party app actions
+            if visit.name.contains(".") {
+                diagnostics.append(Diagnostic(
+                    dependency: .thirdPartyApp(identifier: visit.name),
+                    location: visit.location,
+                    branchContext: visit.branchContext
+                ))
+            }
+            // runShortcut depends on another shortcut
+            if visit.name == "runShortcut" {
+                let shortcutName = extractShortcutName(from: visit.arguments)
+                diagnostics.append(Diagnostic(
+                    dependency: .shortcut(name: shortcutName),
+                    location: visit.location,
+                    branchContext: visit.branchContext
+                ))
             }
         }
+        return diagnostics
     }
 
     private func extractShortcutName(from arguments: [(label: String?, value: Expression)]) -> String {
@@ -100,41 +66,8 @@ struct StandaloneAnalyzer {
         // (DependencyKind.description already wraps in quotes)
         switch expr {
         case .stringLiteral(let s): return s
-        case let e?: return describeExpr(e)
+        case let e?: return ASTWalker.describeExpr(e)
         case nil: return "<unknown>"
-        }
-    }
-
-    private func composeContext(_ existing: String?, _ new: String) -> String {
-        if let existing {
-            return "\(existing), \(new)"
-        }
-        return new
-    }
-
-    private func describeCondition(_ condition: Condition) -> String {
-        switch condition {
-        case .equals(let left, let right):
-            return "\(describeExpr(left)) == \(describeExpr(right))"
-        case .notEquals(let left, let right):
-            return "\(describeExpr(left)) != \(describeExpr(right))"
-        case .contains(let left, let right):
-            return "\(describeExpr(left)) contains \(describeExpr(right))"
-        case .greaterThan(let left, let right):
-            return "\(describeExpr(left)) > \(describeExpr(right))"
-        case .lessThan(let left, let right):
-            return "\(describeExpr(left)) < \(describeExpr(right))"
-        }
-    }
-
-    private func describeExpr(_ expr: Expression) -> String {
-        switch expr {
-        case .stringLiteral(let s): return "\"\(s)\""
-        case .numberLiteral(let n): return n.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(n)) : String(n)
-        case .boolLiteral(let b): return String(b)
-        case .variableReference(let v): return v
-        case .interpolatedString: return "<interpolated string>"
-        case .dictionaryLiteral: return "<dictionary>"
         }
     }
 }
