@@ -183,6 +183,13 @@ perspective-cuts validate --check-locked file.perspective
 
 The `--check-locked` flag queries Apple's ToolKit database to identify actions that require device unlock. It reports each action with its line number and branch context (e.g., "always reachable" vs "reachable when condition is true"). Requires the Shortcuts ToolKit database on your Mac.
 
+```bash
+# Check that shortcut has no external dependencies
+perspective-cuts validate --check-standalone file.perspective
+```
+
+The `--check-standalone` flag detects external dependencies: calls to other shortcuts via `runShortcut` and third-party app actions (dotted identifiers). Reports each dependency with line number and branch context. Useful for ensuring a shortcut can be shared or deployed independently.
+
 ## Built-in Actions
 
 167 verified actions organized by category. Parameters in parentheses are optional.

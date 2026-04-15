@@ -157,6 +157,9 @@ struct Validate: ParsableCommand {
     @Flag(name: .long, help: "Check that the shortcut works on a locked device")
     var checkLocked: Bool = false
 
+    @Flag(name: .long, help: "Check that the shortcut has no external dependencies (other shortcuts or 3rd-party apps)")
+    var checkStandalone: Bool = false
+
     func run() throws {
         let url = URL(fileURLWithPath: file)
         guard FileManager.default.fileExists(atPath: url.path) else {
@@ -176,6 +179,20 @@ struct Validate: ParsableCommand {
             try validateNode(node, registry: registry)
         }
 
+        var hasErrors = false
+
+        if checkStandalone {
+            let analyzer = StandaloneAnalyzer(registry: registry)
+            let diagnostics = analyzer.analyze(nodes: nodes)
+            if !diagnostics.isEmpty {
+                FileHandle.standardError.write(Data("error: shortcut has external dependencies:\n".utf8))
+                for diag in diagnostics {
+                    FileHandle.standardError.write(Data("  \(diag)\n".utf8))
+                }
+                hasErrors = true
+            }
+        }
+
         if checkLocked {
             guard let toolKitReader = try? Compile.openToolKitDB() else {
                 FileHandle.standardError.write(Data("warning: ToolKit database not found — cannot verify lock-screen compatibility\n".utf8))
@@ -189,8 +206,12 @@ struct Validate: ParsableCommand {
                 for diag in diagnostics {
                     FileHandle.standardError.write(Data("  \(diag)\n".utf8))
                 }
-                throw ExitCode.failure
+                hasErrors = true
             }
+        }
+
+        if hasErrors {
+            throw ExitCode.failure
         }
 
         print("Valid. \(nodes.count) statements parsed.")
