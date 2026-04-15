@@ -106,6 +106,7 @@ perspective-cuts discover openai                     # Find third party actions
 perspective-cuts discover --third-party              # All third party apps
 perspective-cuts detail com.openai.chat.AskIntent   # Inspect action parameters
 perspective-cuts validate file.perspective           # Validate syntax
+perspective-cuts validate --check-locked file.perspective  # Check lock-screen compatibility
 ```
 
 ## macOS Only

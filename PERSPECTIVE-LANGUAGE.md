@@ -176,7 +176,12 @@ perspective-cuts discover --third-party
 
 # Validate without compiling
 perspective-cuts validate file.perspective
+
+# Check that shortcut works on a locked device
+perspective-cuts validate --check-locked file.perspective
 ```
+
+The `--check-locked` flag queries Apple's ToolKit database to identify actions that require device unlock. It reports each action with its line number and branch context (e.g., "always reachable" vs "reachable when condition is true"). Requires the Shortcuts ToolKit database on your Mac.
 
 ## Built-in Actions
 
