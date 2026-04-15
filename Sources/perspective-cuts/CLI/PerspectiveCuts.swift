@@ -154,6 +154,9 @@ struct Validate: ParsableCommand {
     @Argument(help: "The .perspective file to validate")
     var file: String
 
+    @Flag(name: .long, help: "Check that the shortcut works on a locked device")
+    var checkLocked: Bool = false
+
     func run() throws {
         let url = URL(fileURLWithPath: file)
         guard FileManager.default.fileExists(atPath: url.path) else {
@@ -171,6 +174,23 @@ struct Validate: ParsableCommand {
         let registry = try ActionRegistry.load()
         for node in nodes {
             try validateNode(node, registry: registry)
+        }
+
+        if checkLocked {
+            guard let toolKitReader = try? Compile.openToolKitDB() else {
+                FileHandle.standardError.write(Data("warning: ToolKit database not found — cannot verify lock-screen compatibility\n".utf8))
+                print("Valid. \(nodes.count) statements parsed.")
+                return
+            }
+            let analyzer = LockAnalyzer(registry: registry, policyProvider: toolKitReader)
+            let diagnostics = analyzer.analyze(nodes: nodes)
+            if !diagnostics.isEmpty {
+                FileHandle.standardError.write(Data("error: shortcut may require device unlock:\n".utf8))
+                for diag in diagnostics {
+                    FileHandle.standardError.write(Data("  \(diag)\n".utf8))
+                }
+                throw ExitCode.failure
+            }
         }
 
         print("Valid. \(nodes.count) statements parsed.")
@@ -478,6 +498,22 @@ final class ToolKitReader: @unchecked Sendable {
             map[p.key] = p
         }
         return map
+    }
+
+    // MARK: - Authentication Policy
+
+    /// Returns the authenticationPolicy for an action, e.g. "none",
+    /// "requiresAuthenticationOnOrigin", "requiresAuthenticationOnOriginAndRemote".
+    /// Returns nil if the action is not found in the ToolKit DB.
+    func getAuthenticationPolicy(identifier: String) -> String? {
+        var stmt: OpaquePointer?
+        let query = "SELECT authenticationPolicy FROM Tools WHERE id = ? LIMIT 1"
+        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, identifier, -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(stmt) == SQLITE_ROW,
+              let cstr = sqlite3_column_text(stmt, 0) else { return nil }
+        return String(cString: cstr)
     }
 
     // MARK: - Discover (existing)
