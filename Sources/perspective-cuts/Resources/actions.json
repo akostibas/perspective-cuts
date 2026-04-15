@@ -928,6 +928,27 @@
         }
       }
     },
+    "appendToFile": {
+      "identifier": "is.workflow.actions.file.append",
+      "description": "Append text to a file in the Shortcuts folder",
+      "parameters": {
+        "input": {
+          "type": "string",
+          "required": true,
+          "key": "WFInput"
+        },
+        "filePath": {
+          "type": "string",
+          "required": true,
+          "key": "WFFilePath"
+        },
+        "makeNewLine": {
+          "type": "boolean",
+          "required": false,
+          "key": "WFAppendOnNewLine"
+        }
+      }
+    },
     "getFileLink": {
       "identifier": "is.workflow.actions.file.getlink",
       "description": "Get a sharing link for a file",
