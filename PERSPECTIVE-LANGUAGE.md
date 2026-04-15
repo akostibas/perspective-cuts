@@ -190,6 +190,13 @@ perspective-cuts validate --check-standalone file.perspective
 
 The `--check-standalone` flag detects external dependencies: calls to other shortcuts via `runShortcut` and third-party app actions (dotted identifiers). Reports each dependency with line number and branch context. Useful for ensuring a shortcut can be shared or deployed independently.
 
+```bash
+# Check for potential Siri timeout issues
+perspective-cuts validate --check-siri file.perspective
+```
+
+The `--check-siri` flag warns when a potentially slow action (network requests, location lookups, AI model calls, etc.) appears on a code path without a preceding output-producing action. Shortcuts invoked via "Hey Siri" error out if no output is produced within ~4-5 seconds. This is a heuristic check — false positives are expected.
+
 ## Built-in Actions
 
 167 verified actions organized by category. Parameters in parentheses are optional.

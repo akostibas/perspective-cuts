@@ -108,6 +108,7 @@ perspective-cuts detail com.openai.chat.AskIntent   # Inspect action parameters
 perspective-cuts validate file.perspective           # Validate syntax
 perspective-cuts validate --check-locked file.perspective  # Check lock-screen compatibility
 perspective-cuts validate --check-standalone file.perspective  # Check for external dependencies
+perspective-cuts validate --check-siri file.perspective        # Check for Siri timeout issues
 ```
 
 ## macOS Only

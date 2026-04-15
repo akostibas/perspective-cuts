@@ -160,6 +160,9 @@ struct Validate: ParsableCommand {
     @Flag(name: .long, help: "Check that the shortcut has no external dependencies (other shortcuts or 3rd-party apps)")
     var checkStandalone: Bool = false
 
+    @Flag(name: .long, help: "Check for potential Siri timeout issues (slow actions without prior output)")
+    var checkSiri: Bool = false
+
     func run() throws {
         let url = URL(fileURLWithPath: file)
         guard FileManager.default.fileExists(atPath: url.path) else {
@@ -186,6 +189,18 @@ struct Validate: ParsableCommand {
             let diagnostics = analyzer.analyze(nodes: nodes)
             if !diagnostics.isEmpty {
                 FileHandle.standardError.write(Data("error: shortcut has external dependencies:\n".utf8))
+                for diag in diagnostics {
+                    FileHandle.standardError.write(Data("  \(diag)\n".utf8))
+                }
+                hasErrors = true
+            }
+        }
+
+        if checkSiri {
+            let analyzer = SiriTimeoutAnalyzer(registry: registry)
+            let diagnostics = analyzer.analyze(nodes: nodes)
+            if !diagnostics.isEmpty {
+                FileHandle.standardError.write(Data("warning: shortcut may trigger Siri timeout:\n".utf8))
                 for diag in diagnostics {
                     FileHandle.standardError.write(Data("  \(diag)\n".utf8))
                 }
