@@ -803,7 +803,8 @@ struct Compiler: Sendable {
             "leaf": 59816, "paintbrush": 59817, "pencil": 59818,
             "scissors": 59819, "wand": 59820, "cube": 59821,
             "download": 59822, "upload": 59823, "share": 59824,
-            "trash": 59825, "magnifyingglass": 59826
+            "trash": 59825, "magnifyingglass": 59826,
+            "robot": 61566
         ]
         return glyphs[name.lowercased()] ?? 59771
     }
