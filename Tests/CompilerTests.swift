@@ -36,6 +36,18 @@ private func testRegistry() -> ActionRegistry {
                     "errorIfNotFound": ActionParameter(type: "boolean", required: false, key: "WFFileErrorIfNotFound")
                 ]
             ),
+            "downloadURL": ActionDefinition(
+                identifier: "is.workflow.actions.downloadurl",
+                description: "Download URL",
+                parameters: [
+                    "url": ActionParameter(type: "string", required: true, key: "WFURL"),
+                    "method": ActionParameter(type: "enum", required: false, key: "WFHTTPMethod"),
+                    "headers": ActionParameter(type: "dictionary", required: false, key: "WFHTTPHeaders"),
+                    "bodyType": ActionParameter(type: "enum", required: false, key: "WFHTTPBodyType"),
+                    "body": ActionParameter(type: "variable", required: false, key: "WFRequestVariable"),
+                    "formValues": ActionParameter(type: "formDictionary", required: false, key: "WFFormValues"),
+                ]
+            ),
         ],
         controlFlow: [:],
         iconColors: ["blue": 463140863, "red": 4271458559]
@@ -486,6 +498,83 @@ func dictionaryNestedType() throws {
     let value = wfItems["Value"] as! [String: Any]
     let items = value["WFDictionaryFieldValueItems"] as! [[String: Any]]
     #expect(items[0]["WFItemType"] as? Int == 1)
+}
+
+// MARK: - Form Dictionary (formValues)
+
+@Test("formDictionary with variable reference produces WFItemType 5 (file)")
+func formDictionaryFileItem() throws {
+    let result = try compile("""
+    getBattery() -> myFile
+    downloadURL(url: "https://example.com/upload", method: "POST", bodyType: "Form", formValues: {"file": myFile})
+    """)
+    let acts = actions(from: result)
+    let uploadParams = params(of: acts[1])
+    let formValues = uploadParams["WFFormValues"] as! [String: Any]
+    let value = formValues["Value"] as! [String: Any]
+    let items = value["WFDictionaryFieldValueItems"] as! [[String: Any]]
+
+    #expect(items.count == 1)
+    #expect(items[0]["WFItemType"] as? Int == 5)
+
+    // Verify the value wrapping: WFTokenAttachmentParameterState > WFTextTokenAttachment
+    let wfValue = items[0]["WFValue"] as! [String: Any]
+    #expect(wfValue["WFSerializationType"] as? String == "WFTokenAttachmentParameterState")
+    let innerValue = wfValue["Value"] as! [String: Any]
+    #expect(innerValue["WFSerializationType"] as? String == "WFTextTokenAttachment")
+}
+
+@Test("formDictionary with string value produces WFItemType 0 (text)")
+func formDictionaryTextItem() throws {
+    let result = try compile("""
+    downloadURL(url: "https://example.com/upload", method: "POST", bodyType: "Form", formValues: {"name": "test.txt"})
+    """)
+    let acts = actions(from: result)
+    let uploadParams = params(of: acts[0])
+    let formValues = uploadParams["WFFormValues"] as! [String: Any]
+    let value = formValues["Value"] as! [String: Any]
+    let items = value["WFDictionaryFieldValueItems"] as! [[String: Any]]
+
+    #expect(items.count == 1)
+    #expect(items[0]["WFItemType"] as? Int == 0)
+}
+
+@Test("formDictionary with mixed file and text entries")
+func formDictionaryMixed() throws {
+    let result = try compile("""
+    getBattery() -> myFile
+    downloadURL(url: "https://example.com/upload", method: "POST", bodyType: "Form", formValues: {"file": myFile, "description": "a test file"})
+    """)
+    let acts = actions(from: result)
+    let uploadParams = params(of: acts[1])
+    let formValues = uploadParams["WFFormValues"] as! [String: Any]
+    let value = formValues["Value"] as! [String: Any]
+    let items = value["WFDictionaryFieldValueItems"] as! [[String: Any]]
+
+    #expect(items.count == 2)
+    // First entry: variable → file (5)
+    #expect(items[0]["WFItemType"] as? Int == 5)
+    // Second entry: string → text (0)
+    #expect(items[1]["WFItemType"] as? Int == 0)
+}
+
+@Test("formDictionary with shortcutInput produces ExtensionInput file item")
+func formDictionaryShortcutInput() throws {
+    let result = try compile("""
+    downloadURL(url: "https://example.com/upload", method: "POST", bodyType: "Form", formValues: {"file": shortcutInput})
+    """)
+    let acts = actions(from: result)
+    let uploadParams = params(of: acts[0])
+    let formValues = uploadParams["WFFormValues"] as! [String: Any]
+    let value = formValues["Value"] as! [String: Any]
+    let items = value["WFDictionaryFieldValueItems"] as! [[String: Any]]
+
+    #expect(items[0]["WFItemType"] as? Int == 5)
+
+    let wfValue = items[0]["WFValue"] as! [String: Any]
+    let innerValue = wfValue["Value"] as! [String: Any]
+    let attachment = innerValue["Value"] as! [String: Any]
+    #expect(attachment["Type"] as? String == "ExtensionInput")
 }
 
 // MARK: - Interpolated Strings

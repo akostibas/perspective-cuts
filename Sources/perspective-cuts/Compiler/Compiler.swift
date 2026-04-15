@@ -235,6 +235,11 @@ struct Compiler: Sendable {
                                         "WFSerializationType": "WFTextTokenAttachment"
                                     ] as [String: Any]
                                 }
+                            } else if let paramType = paramDef?.type, paramType == "formDictionary",
+                                      case .dictionaryLiteral(let entries) = value {
+                                // Form dictionary: variable references become file items (WFItemType 5),
+                                // strings become text items (WFItemType 0).
+                                resolvedValue = try buildFormDictionary(entries: entries, outputMap: outputMap, forEachVarNames: forEachVarNames)
                             } else {
                                 resolvedValue = try expressionToValueWithOutputMap(value, outputMap: outputMap, forEachVarNames: forEachVarNames)
                             }
@@ -475,6 +480,58 @@ struct Compiler: Sendable {
             identifier: "is.workflow.actions.dictionary",
             parameters: ["WFItems": value, "UUID": uuid, "CustomOutputName": "Dictionary"]
         )
+    }
+
+    /// Builds a WFDictionaryFieldValue for form uploads.
+    /// Variable references become file items (WFItemType 5), everything else becomes text (WFItemType 0).
+    private func buildFormDictionary(entries: [DictionaryEntry], outputMap: [String: OutputRef], forEachVarNames: Set<String>) throws -> Any {
+        var items: [[String: Any]] = []
+        for entry in entries {
+            var item: [String: Any] = [:]
+            item["WFKey"] = try expressionToValueWithOutputMap(entry.key, outputMap: outputMap, forEachVarNames: forEachVarNames)
+
+            if case .variableReference(let varName) = entry.value {
+                // Variable reference → file item (WFItemType 5)
+                item["WFItemType"] = 5
+                let attachment: [String: Any]
+                if let ref = outputMap[varName] {
+                    attachment = [
+                        "Value": [
+                            "OutputUUID": ref.uuid,
+                            "Type": "ActionOutput",
+                            "OutputName": ref.name
+                        ] as [String: Any],
+                        "WFSerializationType": "WFTextTokenAttachment"
+                    ]
+                } else if Self.isShortcutInput(varName) {
+                    attachment = [
+                        "Value": Self.extensionInputAttachment(),
+                        "WFSerializationType": "WFTextTokenAttachment"
+                    ]
+                } else {
+                    attachment = [
+                        "Value": [
+                            "VariableName": Self.resolveVariableName(varName, forEachVars: forEachVarNames),
+                            "Type": "Variable"
+                        ] as [String: Any],
+                        "WFSerializationType": "WFTextTokenAttachment"
+                    ]
+                }
+                item["WFValue"] = [
+                    "Value": attachment,
+                    "WFSerializationType": "WFTokenAttachmentParameterState"
+                ] as [String: Any]
+            } else {
+                // String/other → text item (WFItemType 0)
+                item["WFItemType"] = 0
+                item["WFValue"] = try expressionToValueWithOutputMap(entry.value, outputMap: outputMap, forEachVarNames: forEachVarNames)
+            }
+            items.append(item)
+        }
+        return [
+            "Value": ["WFDictionaryFieldValueItems": items],
+            "WFSerializationType": "WFDictionaryFieldValue"
+        ] as [String: Any]
     }
 
     private func buildTextAction(from expression: Expression) throws -> [String: Any] {

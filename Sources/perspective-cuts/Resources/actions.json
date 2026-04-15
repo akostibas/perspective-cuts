@@ -201,6 +201,11 @@
           "type": "variable",
           "required": false,
           "key": "WFRequestVariable"
+        },
+        "formValues": {
+          "type": "formDictionary",
+          "required": false,
+          "key": "WFFormValues"
         }
       }
     },
