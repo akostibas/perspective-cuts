@@ -186,11 +186,14 @@ struct Preprocessor: Sendable {
     /// Walks the AST and renames all variables that are NOT in the exempt set.
     /// Loop iterator variables (for-each item names) are collected during traversal
     /// and also exempted since they map to Shortcuts "Repeat Item" at runtime.
+    /// Built-in variable names that must never be prefixed.
+    private static let builtInVariables: Set<String> = [Compiler.shortcutInputName]
+
     private func prefixNodes(_ nodes: [ASTNode], prefix: String, exempt: Set<String>) -> [ASTNode] {
         // First pass: collect all for-each loop variable names so they're exempt
         var loopVars: Set<String> = []
         collectLoopVars(nodes, into: &loopVars)
-        let allExempt = exempt.union(loopVars)
+        let allExempt = exempt.union(loopVars).union(Self.builtInVariables)
 
         return nodes.map { prefixNode($0, prefix: prefix, exempt: allExempt) }
     }

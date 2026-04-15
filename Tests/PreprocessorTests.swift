@@ -667,4 +667,40 @@ struct PreprocessorTests {
         #expect(secondSetVar["WFVariableName"] as? String == "greeting")
     }
 
+    @Test("Auto-prefixing exempts shortcutInput built-in variable")
+    func shortcutInputNotPrefixed() throws {
+        let tmpDir = try makeTempDir(files: [
+            "main.perspective": """
+            import Shortcuts
+            #name: Test
+            #include "frag.perspective"
+            """,
+            "frag.perspective": """
+            #fragment
+            #provides: result
+            var input = shortcutInput
+            showResult(text: "\\(input)")
+            var result = input
+            """,
+        ])
+        let mainSource = try String(contentsOf: tmpDir.appendingPathComponent("main.perspective"), encoding: .utf8)
+        let nodes = try parse(mainSource)
+        let processed = try Preprocessor(sourceDirectory: tmpDir).preprocess(nodes: nodes)
+
+        // "input" should be prefixed (internal), "shortcutInput" should NOT be
+        var foundVarDecl = false
+        for node in processed {
+            if case .variableDeclaration(let name, let value, _, _) = node {
+                if name.contains("__") && name.hasSuffix("__input") {
+                    foundVarDecl = true
+                    // The value should reference unprefixed shortcutInput
+                    if case .variableReference(let ref) = value {
+                        #expect(ref == "shortcutInput", "shortcutInput should not be prefixed, got: \\(ref)")
+                    }
+                }
+            }
+        }
+        #expect(foundVarDecl, "Expected prefixed internal variable for 'input'")
+    }
+
 } // end PreprocessorTests
