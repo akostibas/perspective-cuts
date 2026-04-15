@@ -59,6 +59,7 @@ struct Compiler: Sendable {
         var shortcutName = "Perspective Shortcut"
         var iconColor = 463140863 // blue default
         var iconGlyph = 59771 // gear default
+        var noInputBehavior: String? = nil
 
         for node in nodes {
             switch node {
@@ -73,6 +74,9 @@ struct Compiler: Sendable {
                 }
                 if key == "name" {
                     shortcutName = value
+                }
+                if key == "noInputBehavior" {
+                    noInputBehavior = value
                 }
             case .comment(let text, _):
                 actions.append(buildAction(
@@ -409,7 +413,7 @@ struct Compiler: Sendable {
             }
         }
 
-        return [
+        var result: [String: Any] = [
             "WFWorkflowMinimumClientVersionString": "900",
             "WFWorkflowMinimumClientVersion": 900,
             "WFWorkflowClientVersion": "1200",
@@ -440,6 +444,19 @@ struct Compiler: Sendable {
             "WFWorkflowActions": actions,
             "WFWorkflowName": shortcutName
         ]
+
+        if let behavior = noInputBehavior {
+            let behaviorMap: [String: String] = [
+                "doNothing": "WFWorkflowNoInputBehaviorDoNothing",
+                "askForInput": "WFWorkflowNoInputBehaviorAskForInput",
+                "getClipboard": "WFWorkflowNoInputBehaviorGetClipboard",
+            ]
+            if let name = behaviorMap[behavior] {
+                result["WFWorkflowNoInputBehavior"] = ["Name": name, "Parameters": [:] as [String: Any]]
+            }
+        }
+
+        return result
     }
 
     // MARK: - Helpers
@@ -601,14 +618,14 @@ struct Compiler: Sendable {
     private func applyCondition(_ condition: Condition, to params: inout [String: Any], outputMap: [String: OutputRef], forEachVarNames: Set<String> = []) throws {
         // Helper: resolve the left-hand side of a condition.
         // Conditionals use a nested format for WFInput:
-        //   { Type: "Variable", Variable: { Value: { ..., Aggrandizements: [coerce to string] }, WFSerializationType: "WFTextTokenAttachment" } }
-        // The Aggrandizements coercion to WFStringContentItem is required
-        // so Shortcuts treats the value as a string before comparing.
-        func resolveInput(_ expr: Expression) throws -> Any {
+        //   { Type: "Variable", Variable: { Value: { ..., Aggrandizements: [coerce] }, WFSerializationType: "WFTextTokenAttachment" } }
+        // String comparisons (==, !=, contains) coerce to WFStringContentItem.
+        // Numeric comparisons (>, <) coerce to WFNumberContentItem.
+        func resolveInput(_ expr: Expression, coercionClass: String = "WFStringContentItem") throws -> Any {
             if case .variableReference(let name) = expr {
                 let coercion: [[String: Any]] = [
                     [
-                        "CoercionItemClass": "WFStringContentItem",
+                        "CoercionItemClass": coercionClass,
                         "Type": "WFCoercionVariableAggrandizement"
                     ]
                 ]
@@ -663,13 +680,13 @@ struct Compiler: Sendable {
             params["WFCondition"] = 99 // contains
             params["WFConditionalActionString"] = try expressionToPlainValue(right)
         case .greaterThan(let left, let right):
-            params["WFInput"] = try resolveInput(left)
+            params["WFInput"] = try resolveInput(left, coercionClass: "WFNumberContentItem")
             params["WFCondition"] = 2 // greater than
-            params["WFConditionalActionString"] = try expressionToPlainValue(right)
+            params["WFNumberValue"] = "\(try expressionToPlainValue(right))"
         case .lessThan(let left, let right):
-            params["WFInput"] = try resolveInput(left)
+            params["WFInput"] = try resolveInput(left, coercionClass: "WFNumberContentItem")
             params["WFCondition"] = 3 // less than
-            params["WFConditionalActionString"] = try expressionToPlainValue(right)
+            params["WFNumberValue"] = "\(try expressionToPlainValue(right))"
         }
     }
 

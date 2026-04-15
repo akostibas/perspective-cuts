@@ -265,6 +265,96 @@ func conditionCodes() throws {
     }
 }
 
+@Test("Numeric comparisons (> <) use WFNumberContentItem coercion")
+func numericCoercion() throws {
+    let result = try compile("""
+    getBattery() -> level
+    if level > "50" {
+        showResult(text: "high")
+    }
+    """)
+    let acts = actions(from: result)
+    let condParams = params(of: acts[1])
+
+    // LHS should be coerced to WFNumberContentItem, not WFStringContentItem
+    let input = condParams["WFInput"] as! [String: Any]
+    let variable = input["Variable"] as! [String: Any]
+    let value = variable["Value"] as! [String: Any]
+    let aggr = value["Aggrandizements"] as! [[String: Any]]
+    #expect(aggr[0]["CoercionItemClass"] as? String == "WFNumberContentItem")
+}
+
+@Test("String comparisons (== != contains) use WFStringContentItem coercion")
+func stringCoercion() throws {
+    let result = try compile("""
+    getBattery() -> level
+    if level == "50" {
+        showResult(text: "exact")
+    }
+    """)
+    let acts = actions(from: result)
+    let condParams = params(of: acts[1])
+
+    let input = condParams["WFInput"] as! [String: Any]
+    let variable = input["Variable"] as! [String: Any]
+    let value = variable["Value"] as! [String: Any]
+    let aggr = value["Aggrandizements"] as! [[String: Any]]
+    #expect(aggr[0]["CoercionItemClass"] as? String == "WFStringContentItem")
+}
+
+@Test("Numeric comparisons use WFNumberValue instead of WFConditionalActionString")
+func numericConditionValue() throws {
+    let result = try compile("""
+    getBattery() -> level
+    if level > "0" {
+        showResult(text: "positive")
+    }
+    """)
+    let acts = actions(from: result)
+    let condParams = params(of: acts[1])
+
+    #expect(condParams["WFNumberValue"] as? String == "0")
+    #expect(condParams["WFConditionalActionString"] == nil)
+}
+
+@Test("String comparisons use WFConditionalActionString, not WFNumberValue")
+func stringConditionValue() throws {
+    let result = try compile("""
+    getBattery() -> level
+    if level == "active" {
+        showResult(text: "yes")
+    }
+    """)
+    let acts = actions(from: result)
+    let condParams = params(of: acts[1])
+
+    #expect(condParams["WFConditionalActionString"] as? String == "active")
+    #expect(condParams["WFNumberValue"] == nil)
+}
+
+@Test("Less-than uses WFNumberContentItem coercion and WFNumberValue")
+func lessThanCoercion() throws {
+    let result = try compile("""
+    getBattery() -> level
+    if level < "10" {
+        showResult(text: "low")
+    }
+    """)
+    let acts = actions(from: result)
+    let condParams = params(of: acts[1])
+
+    // Coercion
+    let input = condParams["WFInput"] as! [String: Any]
+    let variable = input["Variable"] as! [String: Any]
+    let value = variable["Value"] as! [String: Any]
+    let aggr = value["Aggrandizements"] as! [[String: Any]]
+    #expect(aggr[0]["CoercionItemClass"] as? String == "WFNumberContentItem")
+
+    // Value key
+    #expect(condParams["WFNumberValue"] as? String == "10")
+    #expect(condParams["WFConditionalActionString"] == nil)
+}
+
 // MARK: - Repeat Loop
 
 @Test("Repeat loop emits repeat.count actions")
@@ -459,6 +549,26 @@ func metadataIcon() throws {
 func defaultName() throws {
     let result = try compile("getBattery()")
     #expect(result["WFWorkflowName"] as? String == "Perspective Shortcut")
+}
+
+@Test("Metadata #noInputBehavior: doNothing sets WFWorkflowNoInputBehavior")
+func noInputBehaviorDoNothing() throws {
+    let result = try compile("#noInputBehavior: doNothing")
+    let behavior = result["WFWorkflowNoInputBehavior"] as? [String: Any]
+    #expect(behavior?["Name"] as? String == "WFWorkflowNoInputBehaviorDoNothing")
+}
+
+@Test("Metadata #noInputBehavior: askForInput sets WFWorkflowNoInputBehavior")
+func noInputBehaviorAskForInput() throws {
+    let result = try compile("#noInputBehavior: askForInput")
+    let behavior = result["WFWorkflowNoInputBehavior"] as? [String: Any]
+    #expect(behavior?["Name"] as? String == "WFWorkflowNoInputBehaviorAskForInput")
+}
+
+@Test("No #noInputBehavior omits WFWorkflowNoInputBehavior key")
+func noInputBehaviorDefault() throws {
+    let result = try compile("getBattery()")
+    #expect(result["WFWorkflowNoInputBehavior"] == nil)
 }
 
 // MARK: - Comments
