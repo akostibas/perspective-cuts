@@ -44,14 +44,23 @@ struct Compile: ParsableCommand {
         let toolKitReader = try? Self.openToolKitDB()
         let plist = try Compiler(registry: registry, toolKitReader: toolKitReader).compile(nodes: nodes)
 
-        // Determine output path
-        let baseName = inputURL.deletingPathExtension().lastPathComponent
-        let outputPath = output ?? "\(baseName).shortcut"
-        let outputURL = URL(fileURLWithPath: outputPath)
-
         // Extract actions and name for install mode
         let actions = plist["WFWorkflowActions"] as? [[String: Any]] ?? []
+        let baseName = inputURL.deletingPathExtension().lastPathComponent
         let shortcutName = plist["WFWorkflowName"] as? String ?? baseName
+
+        // Determine output path. Precedence (last wins):
+        //   1. Input filename stem          (default)
+        //   2. #name: directive             (if present)
+        //   3. -o / --output                (if present)
+        // The Shortcuts app names imported shortcuts from the .shortcut filename,
+        // not the WFWorkflowName in the plist, so we need the filename to match.
+        let explicitName: String? = nodes.compactMap { node -> String? in
+            if case .metadata(let key, let value, _) = node, key == "name" { return value }
+            return nil
+        }.first
+        let outputPath = output ?? "\(explicitName ?? baseName).shortcut"
+        let outputURL = URL(fileURLWithPath: outputPath)
 
         // Serialize to binary plist
         let data = try PropertyListSerialization.data(
