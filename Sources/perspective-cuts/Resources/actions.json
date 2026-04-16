@@ -843,6 +843,17 @@
     "getCurrentLocation": {
       "identifier": "is.workflow.actions.getcurrentlocation",
       "description": "Get current GPS location",
+      "parameters": {
+        "accuracy": {
+          "type": "enum",
+          "required": false,
+          "key": "Accuracy"
+        }
+      }
+    },
+    "getCurrentApp": {
+      "identifier": "is.workflow.actions.getcurrentapp",
+      "description": "Get the name of the current foreground app",
       "parameters": {}
     },
     "getDistance": {
