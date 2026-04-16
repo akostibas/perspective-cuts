@@ -3,12 +3,24 @@ import Foundation
 struct PreprocessorError: Error, CustomStringConvertible {
     let message: String
     let location: SourceLocation?
+    let includeChain: [(file: String, line: Int)]
+
+    init(message: String, location: SourceLocation?, includeChain: [(file: String, line: Int)] = []) {
+        self.message = message
+        self.location = location
+        self.includeChain = includeChain
+    }
 
     var description: String {
+        var desc = "Preprocessor error"
         if let loc = location {
-            return "Preprocessor error at \(loc): \(message)"
+            desc += " at \(loc)"
         }
-        return "Preprocessor error: \(message)"
+        desc += ": \(message)"
+        for site in includeChain {
+            desc += "\n  included from \(site.file):\(site.line)"
+        }
+        return desc
     }
 }
 
@@ -26,7 +38,7 @@ struct Preprocessor: Sendable {
     /// - An included file cannot be found or parsed
     /// - A `#requires` variable is not in scope at the include site
     /// - Two fragments both `#provides` the same variable
-    func preprocess(nodes: [ASTNode], isTopLevel: Bool = true) throws -> [ASTNode] {
+    func preprocess(nodes: [ASTNode], isTopLevel: Bool = true, includeStack: Set<String> = []) throws -> [ASTNode] {
         // Top-level fragment check
         if isTopLevel && nodes.contains(where: { if case .fragmentMarker = $0 { return true } else { return false } }) {
             throw PreprocessorError(
@@ -51,7 +63,8 @@ struct Preprocessor: Sendable {
                     path: path,
                     location: location,
                     scopedVariables: &scopedVariables,
-                    allProvided: &allProvided
+                    allProvided: &allProvided,
+                    includeStack: includeStack
                 )
                 result.append(contentsOf: included)
             case .fragmentMarker, .providesDeclaration, .requiresDeclaration:
@@ -74,12 +87,22 @@ struct Preprocessor: Sendable {
         path: String,
         location: SourceLocation,
         scopedVariables: inout Set<String>,
-        allProvided: inout [String: String]
+        allProvided: inout [String: String],
+        includeStack: Set<String>
     ) throws -> [ASTNode] {
         let fileURL = sourceDirectory.appendingPathComponent(path)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw PreprocessorError(
                 message: "Included file not found: \(path) (resolved to \(fileURL.path))",
+                location: location
+            )
+        }
+
+        // Cycle detection: check if this file is already being processed
+        let canonicalPath = fileURL.standardizedFileURL.path
+        guard !includeStack.contains(canonicalPath) else {
+            throw PreprocessorError(
+                message: "Circular include detected: '\(path)' is already being processed",
                 location: location
             )
         }
@@ -132,6 +155,24 @@ struct Preprocessor: Sendable {
             }
         }
 
+        // Resolve nested #include directives before auto-prefixing.
+        // Use a child preprocessor with the included file's directory for
+        // correct relative path resolution.
+        let childStack = includeStack.union([canonicalPath])
+        let fragmentDir = fileURL.deletingLastPathComponent()
+        let childPreprocessor = Preprocessor(sourceDirectory: fragmentDir)
+        // Track which variable names are introduced by nested includes so we
+        // can exempt them from the parent fragment's auto-prefixing.
+        let ownVarNames = Self.collectDeclaredVarNames(actionNodes)
+        var nestedVars: Set<String> = []
+        let resolvedNodes = try childPreprocessor.resolveNestedIncludes(
+            nodes: actionNodes,
+            scopedVariables: &scopedVariables,
+            allProvided: &allProvided,
+            includeStack: childStack
+        )
+        nestedVars = Self.collectDeclaredVarNames(resolvedNodes).subtracting(ownVarNames)
+
         // Auto-prefix internal variables if fragment has #provides declarations.
         // Variables NOT in #provides and NOT in #requires are internal.
         let hasContracts = !provides.isEmpty || !requires.isEmpty
@@ -139,9 +180,11 @@ struct Preprocessor: Sendable {
         if hasContracts {
             let prefix = fragmentPrefix(from: path)
             let exempt = provides.union(requires)
-            prefixedNodes = prefixNodes(actionNodes, prefix: prefix, exempt: exempt)
+            // Also exempt variables introduced by resolved nested includes
+            // to prevent double-prefixing.
+            prefixedNodes = prefixNodes(resolvedNodes, prefix: prefix, exempt: exempt.union(nestedVars))
         } else {
-            prefixedNodes = actionNodes
+            prefixedNodes = resolvedNodes
         }
 
         // Register provided variables in scope for subsequent fragments
@@ -161,7 +204,59 @@ struct Preprocessor: Sendable {
             }
         }
 
-        return prefixedNodes
+        // Stamp the fragment's file path onto all SourceLocations so error
+        // messages identify which file the code came from.
+        return setFileOnNodes(prefixedNodes, file: path)
+    }
+
+    /// Walks a node list and resolves any `#include` directives, passing
+    /// through all other nodes unchanged.
+    private func resolveNestedIncludes(
+        nodes: [ASTNode],
+        scopedVariables: inout Set<String>,
+        allProvided: inout [String: String],
+        includeStack: Set<String>
+    ) throws -> [ASTNode] {
+        var result: [ASTNode] = []
+        for node in nodes {
+            switch node {
+            case .includeDirective(let path, let location):
+                let included = try resolveInclude(
+                    path: path,
+                    location: location,
+                    scopedVariables: &scopedVariables,
+                    allProvided: &allProvided,
+                    includeStack: includeStack
+                )
+                result.append(contentsOf: included)
+            case .variableDeclaration(let name, _, _, _):
+                scopedVariables.insert(name)
+                result.append(node)
+            case .actionCall(_, _, let output, _):
+                if let output { scopedVariables.insert(output) }
+                result.append(node)
+            default:
+                result.append(node)
+            }
+        }
+        return result
+    }
+
+    /// Collects all variable names declared at the top level of the given nodes.
+    /// Used to build the exempt set for auto-prefixing so that nested fragment
+    /// variables are not double-prefixed by a parent fragment.
+    private static func collectDeclaredVarNames(_ nodes: [ASTNode]) -> Set<String> {
+        var names: Set<String> = []
+        for node in nodes {
+            switch node {
+            case .variableDeclaration(let name, _, _, _):
+                names.insert(name)
+            case .actionCall(_, _, let output, _):
+                if let output { names.insert(output) }
+            default: break
+            }
+        }
+        return names
     }
 
     // MARK: - Fragment Name Prefix
@@ -321,6 +416,61 @@ struct Preprocessor: Sendable {
         case .contains(let l, let r): return .contains(left: px(l), right: px(r))
         case .greaterThan(let l, let r): return .greaterThan(left: px(l), right: px(r))
         case .lessThan(let l, let r): return .lessThan(left: px(l), right: px(r))
+        }
+    }
+
+    // MARK: - Source File Stamping
+
+    /// Rewrites the `SourceLocation.file` on all nodes to the given path,
+    /// unless the node already has a file set (from a deeper nested include).
+    private func setFileOnNodes(_ nodes: [ASTNode], file: String) -> [ASTNode] {
+        nodes.map { setFileOnNode($0, file: file) }
+    }
+
+    private func stamp(_ loc: SourceLocation, file: String) -> SourceLocation {
+        // Don't overwrite if already set by a deeper nested include
+        if loc.file != nil { return loc }
+        return SourceLocation(line: loc.line, column: loc.column, file: file)
+    }
+
+    private func setFileOnNode(_ node: ASTNode, file: String) -> ASTNode {
+        switch node {
+        case .importStatement(let module, let loc):
+            return .importStatement(module: module, location: stamp(loc, file: file))
+        case .metadata(let key, let value, let loc):
+            return .metadata(key: key, value: value, location: stamp(loc, file: file))
+        case .comment(let text, let loc):
+            return .comment(text: text, location: stamp(loc, file: file))
+        case .variableDeclaration(let name, let value, let isConstant, let loc):
+            return .variableDeclaration(name: name, value: value, isConstant: isConstant, location: stamp(loc, file: file))
+        case .actionCall(let name, let arguments, let output, let loc):
+            return .actionCall(name: name, arguments: arguments, output: output, location: stamp(loc, file: file))
+        case .ifStatement(let condition, let thenBody, let elseBody, let loc):
+            return .ifStatement(
+                condition: condition,
+                thenBody: setFileOnNodes(thenBody, file: file),
+                elseBody: elseBody.map { setFileOnNodes($0, file: file) },
+                location: stamp(loc, file: file)
+            )
+        case .repeatLoop(let count, let body, let loc):
+            return .repeatLoop(count: count, body: setFileOnNodes(body, file: file), location: stamp(loc, file: file))
+        case .forEachLoop(let itemName, let collection, let body, let loc):
+            return .forEachLoop(itemName: itemName, collection: collection, body: setFileOnNodes(body, file: file), location: stamp(loc, file: file))
+        case .menu(let title, let cases, let loc):
+            let stamped = cases.map { (label: $0.label, body: setFileOnNodes($0.body, file: file)) }
+            return .menu(title: title, cases: stamped, location: stamp(loc, file: file))
+        case .functionDeclaration(let name, let body, let loc):
+            return .functionDeclaration(name: name, body: setFileOnNodes(body, file: file), location: stamp(loc, file: file))
+        case .returnStatement(let value, let loc):
+            return .returnStatement(value: value, location: stamp(loc, file: file))
+        case .includeDirective(let path, let loc):
+            return .includeDirective(path: path, location: stamp(loc, file: file))
+        case .fragmentMarker(let loc):
+            return .fragmentMarker(location: stamp(loc, file: file))
+        case .providesDeclaration(let vars, let loc):
+            return .providesDeclaration(variables: vars, location: stamp(loc, file: file))
+        case .requiresDeclaration(let vars, let loc):
+            return .requiresDeclaration(variables: vars, location: stamp(loc, file: file))
         }
     }
 }

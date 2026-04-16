@@ -3,8 +3,20 @@ import Foundation
 struct SourceLocation: Sendable, CustomStringConvertible {
     let line: Int
     let column: Int
+    let file: String?
 
-    var description: String { "line \(line), column \(column)" }
+    init(line: Int, column: Int, file: String? = nil) {
+        self.line = line
+        self.column = column
+        self.file = file
+    }
+
+    var description: String {
+        if let file {
+            return "\(file):line \(line), column \(column)"
+        }
+        return "line \(line), column \(column)"
+    }
 }
 
 enum TokenKind: Sendable, Equatable {

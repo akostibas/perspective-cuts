@@ -703,4 +703,257 @@ struct PreprocessorTests {
         #expect(foundVarDecl, "Expected prefixed internal variable for 'input'")
     }
 
+    // MARK: - Nested Includes
+
+    @Test("Nested include resolves correctly")
+    func nestedInclude() throws {
+        let dir = try makeTempDir(files: [
+            "a.perspective": """
+            #fragment
+            #include "helpers/b.perspective"
+            // From A
+            """,
+            "helpers/b.perspective": """
+            #fragment
+            // From B
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("#include \"a.perspective\"")
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+
+        #expect(result.count == 2)
+        guard case .comment(let t0, _) = result[0] else { Issue.record("Expected comment 0"); return }
+        guard case .comment(let t1, _) = result[1] else { Issue.record("Expected comment 1"); return }
+        #expect(t0 == "From B")
+        #expect(t1 == "From A")
+    }
+
+    @Test("Three levels of nesting work")
+    func threeLevelNesting() throws {
+        let dir = try makeTempDir(files: [
+            "a.perspective": "#fragment\n#include \"b.perspective\"\n// A",
+            "b.perspective": "#fragment\n#include \"c.perspective\"\n// B",
+            "c.perspective": "#fragment\n// C",
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("#include \"a.perspective\"")
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+
+        #expect(result.count == 3)
+        guard case .comment(let t0, _) = result[0] else { Issue.record("Expected C"); return }
+        guard case .comment(let t1, _) = result[1] else { Issue.record("Expected B"); return }
+        guard case .comment(let t2, _) = result[2] else { Issue.record("Expected A"); return }
+        #expect(t0 == "C")
+        #expect(t1 == "B")
+        #expect(t2 == "A")
+    }
+
+    @Test("Nested include paths resolve relative to included file")
+    func nestedRelativePaths() throws {
+        let dir = try makeTempDir(files: [
+            "fragments/api.perspective": """
+            #fragment
+            #include "helpers/http.perspective"
+            // API
+            """,
+            "fragments/helpers/http.perspective": """
+            #fragment
+            // HTTP helper
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("#include \"fragments/api.perspective\"")
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+
+        #expect(result.count == 2)
+        guard case .comment(let t0, _) = result[0] else { Issue.record("Expected HTTP helper"); return }
+        #expect(t0 == "HTTP helper")
+    }
+
+    @Test("Nested fragment with contracts works")
+    func nestedFragmentContracts() throws {
+        let dir = try makeTempDir(files: [
+            "outer.perspective": """
+            #fragment
+            #provides: finalResult
+            #include "inner.perspective"
+            var finalResult = innerResult
+            """,
+            "inner.perspective": """
+            #fragment
+            #provides: innerResult
+            var temp = "working"
+            var innerResult = "done"
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("#include \"outer.perspective\"")
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+
+        // inner's temp should be prefixed with inner__, not double-prefixed
+        var foundInnerTemp = false
+        var foundInnerResult = false
+        var foundFinalResult = false
+        for node in result {
+            if case .variableDeclaration(let name, _, _, _) = node {
+                if name == "inner__temp" { foundInnerTemp = true }
+                if name == "innerResult" { foundInnerResult = true }
+                if name == "finalResult" { foundFinalResult = true }
+                // Should NOT have outer__inner__temp (double-prefix)
+                #expect(!name.contains("outer__inner__"), "Double-prefixed variable found: \(name)")
+            }
+        }
+        #expect(foundInnerTemp, "Expected inner__temp")
+        #expect(foundInnerResult, "Expected innerResult (provided, not prefixed)")
+        #expect(foundFinalResult, "Expected finalResult (provided, not prefixed)")
+    }
+
+    // MARK: - Cycle Detection
+
+    @Test("Direct cycle produces error")
+    func directCycle() throws {
+        let dir = try makeTempDir(files: [
+            "a.perspective": "#fragment\n#include \"b.perspective\"",
+            "b.perspective": "#fragment\n#include \"a.perspective\"",
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("#include \"a.perspective\"")
+        #expect(throws: PreprocessorError.self) {
+            _ = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        }
+    }
+
+    @Test("Indirect cycle produces error")
+    func indirectCycle() throws {
+        let dir = try makeTempDir(files: [
+            "a.perspective": "#fragment\n#include \"b.perspective\"",
+            "b.perspective": "#fragment\n#include \"c.perspective\"",
+            "c.perspective": "#fragment\n#include \"a.perspective\"",
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("#include \"a.perspective\"")
+        #expect(throws: PreprocessorError.self) {
+            _ = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        }
+    }
+
+    @Test("Self-include produces error")
+    func selfInclude() throws {
+        let dir = try makeTempDir(files: [
+            "self.perspective": "#fragment\n#include \"self.perspective\"",
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("#include \"self.perspective\"")
+        #expect(throws: PreprocessorError.self) {
+            _ = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        }
+    }
+
+    @Test("Diamond dependency is allowed (not a cycle)")
+    func diamondDependency() throws {
+        let dir = try makeTempDir(files: [
+            "b.perspective": "#fragment\n#include \"d.perspective\"\n// B",
+            "c.perspective": "#fragment\n#include \"d.perspective\"\n// C",
+            "d.perspective": "#fragment\n// D",
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("""
+        #include "b.perspective"
+        #include "c.perspective"
+        """)
+        // Should not throw — D is included twice but from separate branches
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        let comments = result.compactMap { node -> String? in
+            if case .comment(let text, _) = node { return text }
+            return nil
+        }
+        // D appears twice (once from B, once from C), plus B and C
+        #expect(comments == ["D", "B", "D", "C"])
+    }
+
+    // MARK: - Error Reporting: File Context
+
+    @Test("SourceLocation with file includes filename in description")
+    func sourceLocationFileDescription() {
+        let loc = SourceLocation(line: 5, column: 3, file: "fragments/helper.perspective")
+        #expect(loc.description.contains("fragments/helper.perspective"))
+    }
+
+    @Test("SourceLocation without file is backwards compatible")
+    func sourceLocationNoFile() {
+        let loc = SourceLocation(line: 5, column: 3)
+        #expect(loc.file == nil)
+        #expect(loc.description == "line 5, column 3")
+    }
+
+    @Test("Included fragment nodes have file set in SourceLocation")
+    func includedNodesHaveFile() throws {
+        let dir = try makeTempDir(files: [
+            "frag.perspective": "#fragment\n// From fragment",
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("#include \"frag.perspective\"")
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+
+        guard case .comment(_, let loc) = result[0] else {
+            Issue.record("Expected comment")
+            return
+        }
+        #expect(loc.file == "frag.perspective")
+    }
+
+    @Test("Nested include preserves inner file in SourceLocation")
+    func nestedIncludeFileContext() throws {
+        let dir = try makeTempDir(files: [
+            "outer.perspective": "#fragment\n#include \"inner.perspective\"\n// outer line",
+            "inner.perspective": "#fragment\n// inner line",
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("#include \"outer.perspective\"")
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+
+        // "inner line" should have file = "inner.perspective" (not overwritten by outer)
+        guard case .comment(let text0, let loc0) = result[0] else {
+            Issue.record("Expected comment 0")
+            return
+        }
+        #expect(text0 == "inner line")
+        #expect(loc0.file == "inner.perspective")
+
+        // "outer line" should have file = "outer.perspective"
+        guard case .comment(let text1, let loc1) = result[1] else {
+            Issue.record("Expected comment 1")
+            return
+        }
+        #expect(text1 == "outer line")
+        #expect(loc1.file == "outer.perspective")
+    }
+
+    @Test("PreprocessorError includeChain formats correctly")
+    func preprocessorErrorIncludeChain() {
+        let error = PreprocessorError(
+            message: "unknown action",
+            location: SourceLocation(line: 5, column: 1, file: "inner.perspective"),
+            includeChain: [
+                (file: "outer.perspective", line: 3),
+                (file: "main.perspective", line: 1),
+            ]
+        )
+        let desc = error.description
+        #expect(desc.contains("inner.perspective"))
+        #expect(desc.contains("included from outer.perspective:3"))
+        #expect(desc.contains("included from main.perspective:1"))
+    }
+
 } // end PreprocessorTests

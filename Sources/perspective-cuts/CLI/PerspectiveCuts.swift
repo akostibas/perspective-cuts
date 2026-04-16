@@ -172,9 +172,28 @@ struct Validate: ParsableCommand {
         let tokens = try Lexer(source: source).tokenize()
         let parsedNodes = try Parser(tokens: tokens).parse()
 
-        // Resolve #include directives before validation
-        let sourceDir = url.deletingLastPathComponent()
-        let nodes = try Preprocessor(sourceDirectory: sourceDir).preprocess(nodes: parsedNodes)
+        // For fragment files, skip the preprocessor (which rejects #fragment
+        // files) and run analyzers directly on the filtered parsed nodes.
+        let isFragment = parsedNodes.contains(where: {
+            if case .fragmentMarker = $0 { return true } else { return false }
+        })
+
+        let nodes: [ASTNode]
+        if isFragment {
+            nodes = parsedNodes.filter { node in
+                switch node {
+                case .importStatement, .metadata, .fragmentMarker,
+                     .providesDeclaration, .requiresDeclaration, .includeDirective:
+                    return false
+                default:
+                    return true
+                }
+            }
+        } else {
+            // Resolve #include directives before validation
+            let sourceDir = url.deletingLastPathComponent()
+            nodes = try Preprocessor(sourceDirectory: sourceDir).preprocess(nodes: parsedNodes)
+        }
 
         // Validate action names against registry
         let registry = try ActionRegistry.load()
