@@ -54,16 +54,21 @@ struct ActionRegistry: Sendable {
                 return URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
             }()
 
-            // 1. Next to executable
+            // 1. SPM resource bundle (preferred — embedded at build time)
+            if let bundled = Bundle.module.url(forResource: "actions", withExtension: "json") {
+                urls.append(bundled)
+            }
+
+            // 2. Next to executable (legacy / Homebrew)
             urls.append(execDir.appendingPathComponent("actions.json"))
 
-            // 2. Homebrew Cellar layout: <prefix>/bin/perspective-cuts -> <prefix>/Resources/actions.json
+            // 3. Homebrew Cellar layout: <prefix>/bin/perspective-cuts -> <prefix>/Resources/actions.json
             urls.append(execDir.deletingLastPathComponent().appendingPathComponent("Resources/actions.json"))
 
-            // 3. SPM resource bundle (swift run in development)
+            // 4. SPM resource bundle sidecar (swift run in development)
             urls.append(execDir.appendingPathComponent("perspective-cuts_perspective-cuts.bundle/actions.json"))
 
-            // 4. Bundle.main fallback
+            // 5. Bundle.main fallback
             if let bundleURL = Bundle.main.url(forResource: "actions", withExtension: "json", subdirectory: nil) {
                 urls.append(bundleURL)
             }
