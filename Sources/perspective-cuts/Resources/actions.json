@@ -355,7 +355,7 @@
           "key": "WFInput"
         },
         "specifier": {
-          "type": "string",
+          "type": "plainString",
           "required": false,
           "key": "WFItemSpecifier"
         },
