@@ -128,7 +128,7 @@ struct Compiler: Sendable {
                     if case .dictionaryLiteral = value {
                         sourceAction = try buildDictionaryAction(from: value, outputMap: outputMap, forEachVarNames: forEachVarNames)
                     } else {
-                        sourceAction = try buildTextAction(from: value)
+                        sourceAction = try buildTextAction(from: value, outputMap: outputMap, forEachVarNames: forEachVarNames)
                     }
                     actions.append(sourceAction)
                     actions.append(buildAction(
@@ -178,7 +178,7 @@ struct Compiler: Sendable {
                             let tkParam = toolKitParams?[label]
                             if tkParam?.isDynamicEntity == true || tkParam?.typeKind == 2 {
                                 // Dynamic entity: wrap as { value, title, subtitle }
-                                let plainVal = try expressionToPlainValue(value)
+                                let plainVal = try expressionToPlainValue(value, outputMap: outputMap, forEachVarNames: forEachVarNames)
                                 let strVal = "\(plainVal)"
                                 resolvedValue = [
                                     "value": strVal,
@@ -187,10 +187,10 @@ struct Compiler: Sendable {
                                 ] as [String: Any]
                             } else if tkParam?.typeKind == 3 || tkParam?.typeKind == 4 {
                                 // Static enum: use plain value
-                                resolvedValue = try expressionToPlainValue(value)
+                                resolvedValue = try expressionToPlainValue(value, outputMap: outputMap, forEachVarNames: forEachVarNames)
                             } else {
                                 // Primitives (string, int, bool, etc.): use plain values
-                                resolvedValue = try expressionToPlainValue(value)
+                                resolvedValue = try expressionToPlainValue(value, outputMap: outputMap, forEachVarNames: forEachVarNames)
                             }
                         } else {
                             // Built-in action — use ActionRegistry parameter definitions
@@ -209,7 +209,7 @@ struct Compiler: Sendable {
                                let intVal = valueMap[s] {
                                 resolvedValue = intVal
                             } else if let paramType = paramDef?.type, (paramType == "enum" || paramType == "boolean" || paramType == "plainString") {
-                                resolvedValue = try expressionToPlainValue(value)
+                                resolvedValue = try expressionToPlainValue(value, outputMap: outputMap, forEachVarNames: forEachVarNames)
                             } else if let paramType = paramDef?.type, paramType == "variable",
                                       case .variableReference(let varName) = value {
                                 // Variable-typed parameters need WFTextTokenAttachment,
@@ -306,7 +306,7 @@ struct Compiler: Sendable {
 
             case .repeatLoop(let count, let body, _):
                 let groupID = UUID().uuidString
-                let countValue = try expressionToValue(count)
+                let countValue = try expressionToValueWithOutputMap(count, outputMap: outputMap, forEachVarNames: forEachVarNames)
                 actions.append(buildAction(
                     identifier: "is.workflow.actions.repeat.count",
                     parameters: ["GroupingIdentifier": groupID, "WFControlFlowMode": 0, "WFRepeatCount": countValue]
@@ -534,8 +534,8 @@ struct Compiler: Sendable {
         ] as [String: Any]
     }
 
-    private func buildTextAction(from expression: Expression) throws -> [String: Any] {
-        let value = try expressionToValue(expression)
+    private func buildTextAction(from expression: Expression, outputMap: [String: OutputRef] = [:], forEachVarNames: Set<String> = []) throws -> [String: Any] {
+        let value = try expressionToValueWithOutputMap(expression, outputMap: outputMap, forEachVarNames: forEachVarNames)
         let uuid = UUID().uuidString
         return buildAction(
             identifier: "is.workflow.actions.gettext",
@@ -556,18 +556,14 @@ struct Compiler: Sendable {
         ]
     }
 
-    private func expressionToPlainValue(_ expr: Expression) throws -> Any {
+    private func expressionToPlainValue(_ expr: Expression, outputMap: [String: OutputRef] = [:], forEachVarNames: Set<String> = []) throws -> Any {
         switch expr {
         case .stringLiteral(let s): return s
         case .numberLiteral(let n): return n == n.rounded() ? Int(n) : n
         case .boolLiteral(let b): return b
-        case .dictionaryLiteral: return try expressionToValue(expr)
-        default: return try expressionToValue(expr)
+        case .dictionaryLiteral: return try expressionToValueWithOutputMap(expr, outputMap: outputMap, forEachVarNames: forEachVarNames)
+        default: return try expressionToValueWithOutputMap(expr, outputMap: outputMap, forEachVarNames: forEachVarNames)
         }
-    }
-
-    private func expressionToValue(_ expr: Expression) throws -> Any {
-        return try expressionToValueWithOutputMap(expr, outputMap: [:])
     }
 
     private func expressionToValueWithOutputMap(_ expr: Expression, outputMap: [String: OutputRef], forEachVarNames: Set<String> = []) throws -> Any {
@@ -727,23 +723,23 @@ struct Compiler: Sendable {
         case .equals(let left, let right):
             params["WFInput"] = try resolveInput(left)
             params["WFCondition"] = 4 // equals
-            params["WFConditionalActionString"] = try expressionToPlainValue(right)
+            params["WFConditionalActionString"] = try expressionToPlainValue(right, outputMap: outputMap, forEachVarNames: forEachVarNames)
         case .notEquals(let left, let right):
             params["WFInput"] = try resolveInput(left)
             params["WFCondition"] = 5 // not equals
-            params["WFConditionalActionString"] = try expressionToPlainValue(right)
+            params["WFConditionalActionString"] = try expressionToPlainValue(right, outputMap: outputMap, forEachVarNames: forEachVarNames)
         case .contains(let left, let right):
             params["WFInput"] = try resolveInput(left)
             params["WFCondition"] = 99 // contains
-            params["WFConditionalActionString"] = try expressionToPlainValue(right)
+            params["WFConditionalActionString"] = try expressionToPlainValue(right, outputMap: outputMap, forEachVarNames: forEachVarNames)
         case .greaterThan(let left, let right):
             params["WFInput"] = try resolveInput(left, coercionClass: "WFNumberContentItem")
             params["WFCondition"] = 2 // greater than
-            params["WFNumberValue"] = "\(try expressionToPlainValue(right))"
+            params["WFNumberValue"] = "\(try expressionToPlainValue(right, outputMap: outputMap, forEachVarNames: forEachVarNames))"
         case .lessThan(let left, let right):
             params["WFInput"] = try resolveInput(left, coercionClass: "WFNumberContentItem")
             params["WFCondition"] = 3 // less than
-            params["WFNumberValue"] = "\(try expressionToPlainValue(right))"
+            params["WFNumberValue"] = "\(try expressionToPlainValue(right, outputMap: outputMap, forEachVarNames: forEachVarNames))"
         }
     }
 
