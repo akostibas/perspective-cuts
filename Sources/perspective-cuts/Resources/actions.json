@@ -910,6 +910,11 @@
           "type": "boolean",
           "required": false,
           "key": "WFFileErrorIfNotFound"
+        },
+        "folder": {
+          "type": "iCloudFolder",
+          "required": false,
+          "key": "WFFile"
         }
       }
     },
@@ -936,6 +941,11 @@
           "type": "boolean",
           "required": false,
           "key": "WFAskWhereToSave"
+        },
+        "folder": {
+          "type": "iCloudFolder",
+          "required": false,
+          "key": "WFFolder"
         }
       }
     },

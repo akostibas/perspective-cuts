@@ -235,6 +235,15 @@ struct Compiler: Sendable {
                                         "WFSerializationType": "WFTextTokenAttachment"
                                     ] as [String: Any]
                                 }
+                            } else if let paramType = paramDef?.type, paramType == "iCloudFolder" {
+                                // iCloudFolder: emit an implicit Text action with the
+                                // folder name string, then reference its output as a
+                                // WFTextTokenAttachment. This lets Shortcuts resolve
+                                // the iCloud Drive folder at runtime without embedding
+                                // device-specific bookmark UUIDs.
+                                let folderAction = try buildTextAction(from: value, outputMap: outputMap, forEachVarNames: forEachVarNames)
+                                actions.append(folderAction)
+                                resolvedValue = buildMagicVariable(outputOf: folderAction)
                             } else if let paramType = paramDef?.type, paramType == "formDictionary",
                                       case .dictionaryLiteral(let entries) = value {
                                 // Form dictionary: variable references become file items (WFItemType 5),
