@@ -22,7 +22,7 @@ enum ASTNode: Sendable {
     case includeDirective(path: String, location: SourceLocation)
     case fragmentMarker(location: SourceLocation)
     case providesDeclaration(variables: [String], location: SourceLocation)
-    case requiresDeclaration(variables: [String], location: SourceLocation)
+    case requiresDeclaration(variables: [String], fresh: Bool, location: SourceLocation)
 }
 
 struct DictionaryEntry: Sendable {

@@ -54,6 +54,9 @@ struct Preprocessor: Sendable {
         var scopedVariables: Set<String> = []
         // Track all provided variable names globally to detect duplicates.
         var allProvided: [String: String] = [:] // varName -> fragment path that provided it
+        // Track variables assigned since the last #include, used to validate
+        // `#requires fresh:` — those variables must be (re-)set before each include.
+        var recentlyAssigned: Set<String> = []
 
         var result: [ASTNode] = []
         for node in nodes {
@@ -64,6 +67,7 @@ struct Preprocessor: Sendable {
                     location: location,
                     scopedVariables: &scopedVariables,
                     allProvided: &allProvided,
+                    recentlyAssigned: &recentlyAssigned,
                     includeStack: includeStack
                 )
                 result.append(contentsOf: included)
@@ -72,9 +76,13 @@ struct Preprocessor: Sendable {
                 break
             case .variableDeclaration(let name, _, _, _):
                 scopedVariables.insert(name)
+                recentlyAssigned.insert(name)
                 result.append(node)
             case .actionCall(_, _, let output, _):
-                if let output { scopedVariables.insert(output) }
+                if let output {
+                    scopedVariables.insert(output)
+                    recentlyAssigned.insert(output)
+                }
                 result.append(node)
             default:
                 result.append(node)
@@ -88,6 +96,7 @@ struct Preprocessor: Sendable {
         location: SourceLocation,
         scopedVariables: inout Set<String>,
         allProvided: inout [String: String],
+        recentlyAssigned: inout Set<String>,
         includeStack: Set<String>
     ) throws -> [ASTNode] {
         let fileURL = sourceDirectory.appendingPathComponent(path)
@@ -114,12 +123,16 @@ struct Preprocessor: Sendable {
         // Extract #provides and #requires from the fragment
         var provides: Set<String> = []
         var requires: Set<String> = []
+        var freshRequires: Set<String> = []
         for node in fragmentNodes {
             if case .providesDeclaration(let vars, _) = node {
                 for v in vars { provides.insert(v) }
             }
-            if case .requiresDeclaration(let vars, _) = node {
-                for v in vars { requires.insert(v) }
+            if case .requiresDeclaration(let vars, let isFresh, _) = node {
+                for v in vars {
+                    requires.insert(v)
+                    if isFresh { freshRequires.insert(v) }
+                }
             }
         }
 
@@ -132,6 +145,20 @@ struct Preprocessor: Sendable {
                 )
             }
         }
+
+        // Validate #requires fresh: variables were (re-)assigned since the last #include
+        for req in freshRequires {
+            if !recentlyAssigned.contains(req) {
+                throw PreprocessorError(
+                    message: "Fragment '\(path)' requires fresh variable '\(req)' which was not assigned before this include site",
+                    location: location
+                )
+            }
+        }
+
+        // Clear recentlyAssigned after each include so the next include
+        // of a fragment with fresh requires must have fresh assignments.
+        recentlyAssigned.removeAll()
 
         // Check for duplicate #provides
         for prov in provides {
@@ -169,6 +196,7 @@ struct Preprocessor: Sendable {
             nodes: actionNodes,
             scopedVariables: &scopedVariables,
             allProvided: &allProvided,
+            recentlyAssigned: &recentlyAssigned,
             includeStack: childStack
         )
         nestedVars = Self.collectDeclaredVarNames(resolvedNodes).subtracting(ownVarNames)
@@ -215,6 +243,7 @@ struct Preprocessor: Sendable {
         nodes: [ASTNode],
         scopedVariables: inout Set<String>,
         allProvided: inout [String: String],
+        recentlyAssigned: inout Set<String>,
         includeStack: Set<String>
     ) throws -> [ASTNode] {
         var result: [ASTNode] = []
@@ -226,14 +255,19 @@ struct Preprocessor: Sendable {
                     location: location,
                     scopedVariables: &scopedVariables,
                     allProvided: &allProvided,
+                    recentlyAssigned: &recentlyAssigned,
                     includeStack: includeStack
                 )
                 result.append(contentsOf: included)
             case .variableDeclaration(let name, _, _, _):
                 scopedVariables.insert(name)
+                recentlyAssigned.insert(name)
                 result.append(node)
             case .actionCall(_, _, let output, _):
-                if let output { scopedVariables.insert(output) }
+                if let output {
+                    scopedVariables.insert(output)
+                    recentlyAssigned.insert(output)
+                }
                 result.append(node)
             default:
                 result.append(node)
@@ -469,8 +503,8 @@ struct Preprocessor: Sendable {
             return .fragmentMarker(location: stamp(loc, file: file))
         case .providesDeclaration(let vars, let loc):
             return .providesDeclaration(variables: vars, location: stamp(loc, file: file))
-        case .requiresDeclaration(let vars, let loc):
-            return .requiresDeclaration(variables: vars, location: stamp(loc, file: file))
+        case .requiresDeclaration(let vars, let fresh, let loc):
+            return .requiresDeclaration(variables: vars, fresh: fresh, location: stamp(loc, file: file))
         }
     }
 }

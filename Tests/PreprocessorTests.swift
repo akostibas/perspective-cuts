@@ -282,7 +282,7 @@ struct PreprocessorTests {
     @Test("Parser parses #requires directive")
     func parseRequires() throws {
         let nodes = try parse("#requires: serverURL")
-        guard case .requiresDeclaration(let vars, _) = nodes[0] else {
+        guard case .requiresDeclaration(let vars, _, _) = nodes[0] else {
             Issue.record("Expected requiresDeclaration")
             return
         }
@@ -954,6 +954,214 @@ struct PreprocessorTests {
         #expect(desc.contains("inner.perspective"))
         #expect(desc.contains("included from outer.perspective:3"))
         #expect(desc.contains("included from main.perspective:1"))
+    }
+
+    // MARK: - #requires fresh
+
+    @Test("Parser parses #requires fresh directive")
+    func parseRequiresFresh() throws {
+        let nodes = try parse("#requires fresh: debugLine, debugPath")
+        guard case .requiresDeclaration(let vars, let fresh, _) = nodes[0] else {
+            Issue.record("Expected requiresDeclaration")
+            return
+        }
+        #expect(vars == ["debugLine", "debugPath"])
+        #expect(fresh == true)
+    }
+
+    @Test("Parser parses plain #requires as non-fresh")
+    func parseRequiresNotFresh() throws {
+        let nodes = try parse("#requires: serverURL")
+        guard case .requiresDeclaration(_, let fresh, _) = nodes[0] else {
+            Issue.record("Expected requiresDeclaration")
+            return
+        }
+        #expect(fresh == false)
+    }
+
+    @Test("#requires fresh passes with var set before include")
+    func freshRequiresSatisfied() throws {
+        let dir = try makeTempDir(files: [
+            "writer.perspective": """
+            #fragment
+            #requires fresh: line
+            // uses line
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("""
+        var line = "hello"
+        #include "writer.perspective"
+        """)
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        #expect(!result.isEmpty)
+    }
+
+    @Test("#requires fresh fails on second include without re-set")
+    func freshRequiresFailsSecondInclude() throws {
+        let dir = try makeTempDir(files: [
+            "writer.perspective": """
+            #fragment
+            #requires fresh: line
+            // uses line
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("""
+        var line = "hello"
+        #include "writer.perspective"
+        #include "writer.perspective"
+        """)
+        #expect(throws: PreprocessorError.self) {
+            _ = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        }
+    }
+
+    @Test("#requires fresh passes when re-set between includes")
+    func freshRequiresResetBetweenIncludes() throws {
+        let dir = try makeTempDir(files: [
+            "writer.perspective": """
+            #fragment
+            #requires fresh: line
+            // uses line
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("""
+        var line = "first"
+        #include "writer.perspective"
+        var line = "second"
+        #include "writer.perspective"
+        """)
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        #expect(!result.isEmpty)
+    }
+
+    @Test("Mixed #requires and #requires fresh in same fragment")
+    func mixedRequiresAndFresh() throws {
+        let dir = try makeTempDir(files: [
+            "logger.perspective": """
+            #fragment
+            #requires: logPath
+            #requires fresh: message
+            // uses logPath and message
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        // First include: both logPath and message set — should pass
+        let mainNodes = try parse("""
+        var logPath = "/tmp/log"
+        var message = "first"
+        #include "logger.perspective"
+        var message = "second"
+        #include "logger.perspective"
+        """)
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        #expect(!result.isEmpty)
+    }
+
+    @Test("Mixed requires: fresh fails but non-fresh passes on second include")
+    func mixedRequiresFreshFailsSecondInclude() throws {
+        let dir = try makeTempDir(files: [
+            "logger.perspective": """
+            #fragment
+            #requires: logPath
+            #requires fresh: message
+            // uses logPath and message
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        // logPath is set once (fine — not fresh), but message is not re-set
+        let mainNodes = try parse("""
+        var logPath = "/tmp/log"
+        var message = "first"
+        #include "logger.perspective"
+        #include "logger.perspective"
+        """)
+        #expect(throws: PreprocessorError.self) {
+            _ = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        }
+    }
+
+    @Test("Action output capture satisfies #requires fresh")
+    func freshRequiresSatisfiedByCapture() throws {
+        let dir = try makeTempDir(files: [
+            "processor.perspective": """
+            #fragment
+            #requires fresh: data
+            // uses data
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("""
+        getBattery() -> data
+        #include "processor.perspective"
+        """)
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        #expect(!result.isEmpty)
+    }
+
+    @Test("#requires fresh with single include behaves same as #requires")
+    func freshRequiresSingleInclude() throws {
+        let dir = try makeTempDir(files: [
+            "frag.perspective": """
+            #fragment
+            #requires fresh: x
+            // uses x
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        // Passes: x is set before the only include
+        let mainNodes = try parse("""
+        var x = "hello"
+        #include "frag.perspective"
+        """)
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        #expect(!result.isEmpty)
+    }
+
+    @Test("#requires fresh fails when variable not in scope at all")
+    func freshRequiresNotInScope() throws {
+        let dir = try makeTempDir(files: [
+            "frag.perspective": """
+            #fragment
+            #requires fresh: missing
+            // uses missing
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("#include \"frag.perspective\"")
+        #expect(throws: PreprocessorError.self) {
+            _ = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        }
+    }
+
+    @Test("Non-fresh #requires still passes on second include without re-set")
+    func nonFreshRequiresPassesSecondInclude() throws {
+        let dir = try makeTempDir(files: [
+            "reader.perspective": """
+            #fragment
+            #requires: config
+            // uses config
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mainNodes = try parse("""
+        var config = "value"
+        #include "reader.perspective"
+        #include "reader.perspective"
+        """)
+        let result = try Preprocessor(sourceDirectory: dir).preprocess(nodes: mainNodes)
+        #expect(!result.isEmpty)
     }
 
 } // end PreprocessorTests

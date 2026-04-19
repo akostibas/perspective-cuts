@@ -106,10 +106,16 @@ struct Parser: Sendable {
         }
 
         // #requires: var1, var2, var3
+        // #requires fresh: var1, var2, var3
         if key == "requires" {
             pos += 1 // skip 'requires'
+            var fresh = false
+            if pos < tokens.count, case .identifier("fresh") = tokens[pos].kind {
+                fresh = true
+                pos += 1 // skip 'fresh'
+            }
             let vars = try parseCommaIdentifierList(&pos, directive: "requires", location: loc)
-            return .requiresDeclaration(variables: vars, location: loc)
+            return .requiresDeclaration(variables: vars, fresh: fresh, location: loc)
         }
 
         pos += 1

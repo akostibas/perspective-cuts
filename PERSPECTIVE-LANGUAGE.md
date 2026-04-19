@@ -355,7 +355,7 @@ For third party apps, use the full identifier with dots: `com.openai.chat.AskInt
 
 The `case` keyword is reserved. The `changeCase` action cannot be used until the parser is updated. Use `useModel` as a workaround.
 
-For multi-file shortcuts, use `#include "path/to/fragment.perspective"` to inline other files. Mark non-standalone files with `#fragment`. Include paths are relative to the including file. The compiler strips imports and metadata from included files automatically. Use `#provides: var1, var2` and `#requires: var1` to declare fragment contracts — the compiler validates dependencies and auto-prefixes internal variables to prevent collisions.
+For multi-file shortcuts, use `#include "path/to/fragment.perspective"` to inline other files. Mark non-standalone files with `#fragment`. Include paths are relative to the including file. The compiler strips imports and metadata from included files automatically. Use `#provides: var1, var2` and `#requires: var1` to declare fragment contracts — the compiler validates dependencies and auto-prefixes internal variables to prevent collisions. Use `#requires fresh: var1` for variables that must be re-set before each include (the function-call pattern).
 
 Compile with `perspective-cuts compile --sign file.perspective`. Always use `--sign` for importable shortcuts.
 
@@ -657,6 +657,41 @@ var sessionId = "abc-123"
 The compiler validates that every `#requires` variable is in scope at the include site — whether from an earlier fragment's `#provides`, a `var` declaration in the main file, or a `->` capture in the main file.
 
 Two fragments providing the same variable name is a compile error.
+
+### Fresh Requirements
+
+Some fragments are used like functions — included multiple times with different inputs each time. For these, use `#requires fresh:` to ensure the caller sets the variable before *every* include, not just the first one.
+
+```
+// fragments/debug-write.perspective
+#fragment
+#requires: debugLogPath
+#requires fresh: debugLine
+
+if debugEnabled == "true" {
+    appendToFile(input: debugLine, path: debugLogPath, newLine: true)
+}
+```
+
+```
+// main.perspective
+import Shortcuts
+#name: Debug Example
+
+var debugLogPath = "/tmp/debug.log"
+
+var debugLine = "starting up"
+#include "fragments/debug-write.perspective"
+
+var debugLine = "processing complete"
+#include "fragments/debug-write.perspective"
+```
+
+The `debugLogPath` variable is config-like — set once and used by every include. The `debugLine` variable is parameter-like — it needs a fresh value each time. Without `#requires fresh:`, forgetting to re-set `debugLine` before the second include would silently use the stale value. With it, the compiler catches the mistake.
+
+After each `#include`, fresh-required variables are cleared from the "recently assigned" set. The caller must assign them again before the next include of any fragment that requires them fresh.
+
+You can mix `#requires:` and `#requires fresh:` in the same fragment. Regular `#requires` just checks that the variable exists in scope. `#requires fresh:` additionally checks that it was assigned since the last `#include`.
 
 ### Variable Auto-Prefixing
 
