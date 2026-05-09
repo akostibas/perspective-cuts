@@ -510,7 +510,7 @@
       "description": "Replace text in a string",
       "parameters": {
         "input": {
-          "type": "variable",
+          "type": "string",
           "required": true,
           "key": "WFInput"
         },
@@ -744,7 +744,7 @@
           "key": "WFDate"
         },
         "style": {
-          "type": "string",
+          "type": "plainString",
           "required": false,
           "key": "WFDateFormatStyle"
         },
