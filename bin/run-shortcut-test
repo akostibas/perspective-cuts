@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Build, install (if needed), and run a .perspective shortcut headlessly.
+# Captures stdout for assertion.
+#
+# Usage:
+#   bin/run-shortcut-test <path/to/foo.perspective> [-i <input-file>]
+#
+# Requires:
+#   - perspective-cuts on PATH (or run from this repo via `swift run perspective-cuts`)
+#   - Accessibility + Automation permissions for Terminal (one-time grant)
+#
+# See docs/dev-workflow.md.
+
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+    echo "usage: $0 <path/to/foo.perspective> [-i <input-file>]" >&2
+    exit 2
+fi
+
+SOURCE="$1"
+shift
+INPUT_ARGS=()
+if [[ ${1:-} == "-i" ]]; then
+    INPUT_ARGS=(-i "$2")
+    shift 2
+fi
+
+if [[ ! -f "$SOURCE" ]]; then
+    echo "error: source not found: $SOURCE" >&2
+    exit 1
+fi
+
+# Resolve compiler: prefer PATH, fall back to local debug build.
+if command -v perspective-cuts >/dev/null 2>&1; then
+    PC=(perspective-cuts)
+elif [[ -x ".build/debug/perspective-cuts" ]]; then
+    PC=(.build/debug/perspective-cuts)
+else
+    echo "error: perspective-cuts not on PATH and .build/debug/perspective-cuts not found" >&2
+    echo "  run 'swift build' first, or install perspective-cuts" >&2
+    exit 1
+fi
+
+# Extract #name from source, fall back to capitalized basename.
+SHORTCUT_NAME="$(grep -m1 '^#name:' "$SOURCE" | sed 's/^#name:[[:space:]]*//' || true)"
+if [[ -z "$SHORTCUT_NAME" ]]; then
+    base="$(basename "$SOURCE" .perspective)"
+    SHORTCUT_NAME="${base^}"
+fi
+
+BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/run-shortcut-test-XXXXXX")"
+trap 'rm -rf "$BUILD_DIR"' EXIT
+COMPILED="${BUILD_DIR}/${SHORTCUT_NAME}.shortcut"
+
+echo "==> compiling $SOURCE -> $COMPILED" >&2
+"${PC[@]}" compile --sign -o "$COMPILED" "$SOURCE"
+
+# Idempotent install: skip if already in library.
+if shortcuts list | grep -Fxq "$SHORTCUT_NAME"; then
+    echo "==> already installed: $SHORTCUT_NAME (skipping import)" >&2
+else
+    echo "==> installing $SHORTCUT_NAME via Shortcuts app + System Events" >&2
+    open "$COMPILED"
+
+    # Wait for Shortcuts import window, then press Return to default-action
+    # the "Add Shortcut" button. This is the only step that needs a one-time
+    # Accessibility/Automation grant for Terminal.
+    osascript <<'OSA' >&2
+tell application "System Events"
+    tell process "Shortcuts"
+        repeat 40 times
+            if exists window 1 then exit repeat
+            delay 0.1
+        end repeat
+        set frontmost to true
+        delay 0.3
+        keystroke return
+    end tell
+end tell
+OSA
+
+    # Verify install landed.
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        if shortcuts list | grep -Fxq "$SHORTCUT_NAME"; then
+            break
+        fi
+        sleep 0.5
+    done
+    if ! shortcuts list | grep -Fxq "$SHORTCUT_NAME"; then
+        echo "error: install did not land — '$SHORTCUT_NAME' not in shortcuts list" >&2
+        echo "  if a dialog is still on screen, the import-dialog UI may have changed" >&2
+        echo "  see docs/dev-workflow.md" >&2
+        exit 1
+    fi
+    osascript -e 'tell application "Shortcuts" to quit' 2>/dev/null || true
+fi
+
+OUTPUT="${BUILD_DIR}/output.txt"
+echo "==> running: shortcuts run \"$SHORTCUT_NAME\" -o $OUTPUT ${INPUT_ARGS[*]:-}" >&2
+shortcuts run "$SHORTCUT_NAME" -o "$OUTPUT" "${INPUT_ARGS[@]}"
+
+if [[ -f "$OUTPUT" ]]; then
+    cat "$OUTPUT"
+fi
