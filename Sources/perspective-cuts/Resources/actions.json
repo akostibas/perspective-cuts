@@ -739,7 +739,7 @@
       "description": "Format a date as text",
       "parameters": {
         "date": {
-          "type": "variable",
+          "type": "string",
           "required": true,
           "key": "WFDate"
         },
