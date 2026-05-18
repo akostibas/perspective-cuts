@@ -47,6 +47,18 @@ struct Compiler: Sendable {
         forEachVars.contains(name) ? "Repeat Item" : name
     }
 
+    /// Maps a friendly `coerce` value from actions.json to the Shortcuts
+    /// `CoercionItemClass` string used inside a WFCoercionVariableAggrandizement.
+    /// Unknown values are ignored (treated as no coercion).
+    private func coerceItemClass(for coerce: String) -> String? {
+        switch coerce {
+        case "string", "text": return "WFStringContentItem"
+        case "number": return "WFNumberContentItem"
+        case "dictionary": return "WFDictionaryContentItem"
+        default: return nil
+        }
+    }
+
     func compile(nodes: [ASTNode]) throws -> [String: Any] {
         var outputMap: [String: OutputRef] = [:]
         var declaredVariables: Set<String> = [Self.shortcutInputName]
@@ -215,26 +227,40 @@ struct Compiler: Sendable {
                                 // Variable-typed parameters need WFTextTokenAttachment,
                                 // not WFTextTokenString, so the action receives the
                                 // output directly rather than as interpolated text.
-                                if let ref = outputMap[varName] {
-                                    resolvedValue = [
-                                        "Value": [
-                                            "OutputUUID": ref.uuid,
-                                            "Type": "ActionOutput",
-                                            "OutputName": ref.name
-                                        ],
-                                        "WFSerializationType": "WFTextTokenAttachment"
-                                    ] as [String: Any]
-                                } else if Self.isShortcutInput(varName) {
-                                    resolvedValue = [
-                                        "Value": Self.extensionInputAttachment(),
-                                        "WFSerializationType": "WFTextTokenAttachment"
-                                    ] as [String: Any]
-                                } else {
-                                    resolvedValue = [
-                                        "Value": ["VariableName": Self.resolveVariableName(varName, forEachVars: forEachVarNames), "Type": "Variable"],
-                                        "WFSerializationType": "WFTextTokenAttachment"
-                                    ] as [String: Any]
+                                //
+                                // Optional `coerce` on the parameter injects a
+                                // WFCoercionVariableAggrandizement so Shortcuts reads
+                                // the upstream value in the requested form — e.g.
+                                // "string" forces a File (such as downloadURL's
+                                // response) to be read as its text content rather
+                                // than as the File object itself, which is what
+                                // makes `getDictionary` actually see the JSON body.
+                                let coerceClass: String? = paramDef?.coerce.flatMap { coerceItemClass(for: $0) }
+                                let aggrandizements: [[String: Any]]? = coerceClass.map { cls in
+                                    [[
+                                        "CoercionItemClass": cls,
+                                        "Type": "WFCoercionVariableAggrandizement"
+                                    ]]
                                 }
+                                var inner: [String: Any]
+                                if let ref = outputMap[varName] {
+                                    inner = [
+                                        "OutputUUID": ref.uuid,
+                                        "Type": "ActionOutput",
+                                        "OutputName": ref.name
+                                    ]
+                                } else if Self.isShortcutInput(varName) {
+                                    inner = Self.extensionInputAttachment()
+                                } else {
+                                    inner = ["VariableName": Self.resolveVariableName(varName, forEachVars: forEachVarNames), "Type": "Variable"]
+                                }
+                                if let aggrandizements {
+                                    inner["Aggrandizements"] = aggrandizements
+                                }
+                                resolvedValue = [
+                                    "Value": inner,
+                                    "WFSerializationType": "WFTextTokenAttachment"
+                                ] as [String: Any]
                             } else if let paramType = paramDef?.type, paramType == "iCloudFolder" {
                                 // iCloudFolder: emit an implicit Text action with the
                                 // folder name string, then reference its output as a

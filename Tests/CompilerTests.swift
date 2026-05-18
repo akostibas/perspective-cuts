@@ -48,6 +48,20 @@ private func testRegistry() -> ActionRegistry {
                     "formValues": ActionParameter(type: "formDictionary", required: false, key: "WFFormValues"),
                 ]
             ),
+            "getDictionary": ActionDefinition(
+                identifier: "is.workflow.actions.detect.dictionary",
+                description: "Get dictionary from input",
+                parameters: [
+                    "input": ActionParameter(type: "variable", required: true, key: "WFInput", coerce: "string")
+                ]
+            ),
+            "noCoerceSink": ActionDefinition(
+                identifier: "test.no.coerce.sink",
+                description: "Test action whose variable parameter has no coerce hint",
+                parameters: [
+                    "input": ActionParameter(type: "variable", required: true, key: "WFInput")
+                ]
+            ),
         ],
         controlFlow: [:],
         iconColors: ["blue": 463140863, "red": 4271458559]
@@ -294,6 +308,42 @@ func numericCoercion() throws {
     let value = variable["Value"] as! [String: Any]
     let aggr = value["Aggrandizements"] as! [[String: Any]]
     #expect(aggr[0]["CoercionItemClass"] as? String == "WFNumberContentItem")
+}
+
+@Test("Variable parameter with coerce: string injects WFStringContentItem aggrandizement")
+func variableParamCoercesToString() throws {
+    let result = try compile("""
+    downloadURL(url: "https://example.com") -> raw
+    getDictionary(input: raw) -> dict
+    """)
+    let acts = actions(from: result)
+    // [0] downloadURL, [1] getDictionary
+    let getDictParams = params(of: acts[1])
+    #expect(identifier(of: acts[1]) == "is.workflow.actions.detect.dictionary")
+
+    let input = getDictParams["WFInput"] as! [String: Any]
+    #expect(input["WFSerializationType"] as? String == "WFTextTokenAttachment")
+    let value = input["Value"] as! [String: Any]
+    // The value should still point at the downloadURL action output
+    #expect(value["Type"] as? String == "ActionOutput")
+    // …and now carry the string-coercion aggrandizement
+    let aggr = value["Aggrandizements"] as! [[String: Any]]
+    #expect(aggr.count == 1)
+    #expect(aggr[0]["CoercionItemClass"] as? String == "WFStringContentItem")
+    #expect(aggr[0]["Type"] as? String == "WFCoercionVariableAggrandizement")
+}
+
+@Test("Variable parameter without coerce omits Aggrandizements")
+func variableParamWithoutCoerceHasNoAggrandizements() throws {
+    let result = try compile("""
+    downloadURL(url: "https://example.com") -> raw
+    noCoerceSink(input: raw)
+    """)
+    let acts = actions(from: result)
+    let sinkParams = params(of: acts[1])
+    let input = sinkParams["WFInput"] as! [String: Any]
+    let value = input["Value"] as! [String: Any]
+    #expect(value["Aggrandizements"] == nil)
 }
 
 @Test("String comparisons (== != contains) use WFStringContentItem coercion")

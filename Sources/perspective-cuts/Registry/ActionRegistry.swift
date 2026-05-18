@@ -9,13 +9,20 @@ struct ActionParameter: Sendable {
     let key: String
     let values: [String]?
     let valueMap: [String: Int]?
+    /// Optional coercion hint emitted as a WFCoercionVariableAggrandizement on
+    /// the parameter's WFInput. Used when an action needs Shortcuts to read a
+    /// File's text content rather than the File object itself — e.g.
+    /// `getDictionary` on a downloadURL response. Currently supports "string"
+    /// (→ WFStringContentItem).
+    let coerce: String?
 
-    init(type: String, required: Bool, key: String, values: [String]? = nil, valueMap: [String: Int]? = nil) {
+    init(type: String, required: Bool, key: String, values: [String]? = nil, valueMap: [String: Int]? = nil, coerce: String? = nil) {
         self.type = type
         self.required = required
         self.key = key
         self.values = values
         self.valueMap = valueMap
+        self.coerce = coerce
     }
 }
 
@@ -103,7 +110,8 @@ struct ActionRegistry: Sendable {
                             required: paramDef["required"] as? Bool ?? false,
                             key: paramDef["key"] as? String ?? paramName,
                             values: paramDef["values"] as? [String],
-                            valueMap: paramDef["values"] as? [String: Int]
+                            valueMap: paramDef["values"] as? [String: Int],
+                            coerce: paramDef["coerce"] as? String
                         )
                     }
                 }

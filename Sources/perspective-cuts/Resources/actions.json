@@ -1764,7 +1764,8 @@
         "input": {
           "type": "variable",
           "required": true,
-          "key": "WFInput"
+          "key": "WFInput",
+          "coerce": "string"
         }
       }
     },
