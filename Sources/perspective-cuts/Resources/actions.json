@@ -546,14 +546,9 @@
           "key": "text"
         },
         "separator": {
-          "type": "string",
+          "type": "textSeparator",
           "required": false,
           "key": "WFTextSeparator"
-        },
-        "customSeparator": {
-          "type": "string",
-          "required": false,
-          "key": "WFTextCustomSeparator"
         }
       }
     },
@@ -567,14 +562,9 @@
           "key": "text"
         },
         "separator": {
-          "type": "string",
+          "type": "textSeparator",
           "required": false,
           "key": "WFTextSeparator"
-        },
-        "customSeparator": {
-          "type": "string",
-          "required": false,
-          "key": "WFTextCustomSeparator"
         }
       }
     },
