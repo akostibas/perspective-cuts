@@ -6,7 +6,7 @@ struct PerspectiveCuts: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "perspective",
         abstract: "Perspective Cuts — A text-based Apple Shortcuts compiler",
-        version: "0.1.0",
+        version: BuildInfo.versionString,
         subcommands: [Compile.self, Validate.self, Actions.self, Discover.self, Detail.self]
     )
 }
@@ -42,10 +42,23 @@ struct Compile: ParsableCommand {
 
         let registry = try ActionRegistry.load()
         let toolKitReader = try? Self.openToolKitDB()
-        let plist = try Compiler(registry: registry, toolKitReader: toolKitReader).compile(nodes: nodes)
+        var plist = try Compiler(registry: registry, toolKitReader: toolKitReader).compile(nodes: nodes)
 
-        // Extract actions and name for install mode
-        let actions = plist["WFWorkflowActions"] as? [[String: Any]] ?? []
+        // Stamp the compiled output with the compiler's git revision and
+        // build timestamp. Surfaces stale-binary problems from inside the
+        // Shortcuts app, where the compiled .shortcut may otherwise look
+        // identical to a fresh one. Lives here (not in Compiler) so unit
+        // tests that index into actions[0] stay clean.
+        let banner: [String: Any] = [
+            "WFWorkflowActionIdentifier": "is.workflow.actions.comment",
+            "WFWorkflowActionParameters": [
+                "WFCommentActionText": BuildInfo.compiledByLine
+            ]
+        ]
+        var actions = (plist["WFWorkflowActions"] as? [[String: Any]]) ?? []
+        actions.insert(banner, at: 0)
+        plist["WFWorkflowActions"] = actions
+
         let baseName = inputURL.deletingPathExtension().lastPathComponent
         let shortcutName = plist["WFWorkflowName"] as? String ?? baseName
 

@@ -31,16 +31,17 @@ if [[ ! -f "$SOURCE" ]]; then
     exit 1
 fi
 
-# Resolve compiler: prefer PATH, fall back to local debug build.
-if command -v perspective-cuts >/dev/null 2>&1; then
-    PC=(perspective-cuts)
-elif [[ -x ".build/debug/perspective-cuts" ]]; then
-    PC=(.build/debug/perspective-cuts)
-else
-    echo "error: perspective-cuts not on PATH and .build/debug/perspective-cuts not found" >&2
-    echo "  run 'swift build' first, or install perspective-cuts" >&2
-    exit 1
-fi
+# Always rebuild before running. `git checkout` invalidates .build/debug/
+# artifacts but does not trigger a rebuild, so without this the test would
+# silently use whatever binary was last built — possibly many commits stale.
+# `bin/build` also regenerates BuildInfo.swift so the compiled .shortcut
+# carries the current git SHA, making stale-binary issues debuggable from
+# inside the Shortcuts app.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+echo "==> building perspective-cuts" >&2
+(cd "$REPO_ROOT" && bin/build) >&2
+PC=("$REPO_ROOT/.build/debug/perspective-cuts")
 
 # Extract #name from source, fall back to capitalized basename.
 SHORTCUT_NAME="$(grep -m1 '^#name:' "$SOURCE" | sed 's/^#name:[[:space:]]*//' || true)"
