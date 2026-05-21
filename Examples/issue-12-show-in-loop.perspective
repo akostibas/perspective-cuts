@@ -1,0 +1,20 @@
+#name: Issue 12 Show In Loop
+#icon: bug
+#color: red
+
+// Repro A: showResult INSIDE the for-each body, on a variable-typed-param
+// captured inside the loop. No outer capture. If this works, "show inside
+// loop body" is fine. If it shows nothing or wrong content, that path is broken.
+//
+// Expected: 3 dialogs in sequence, last one captures as "third".
+
+text(text: "{\"items\":[{\"text\":\"first\"},{\"text\":\"second\"},{\"text\":\"third\"}]}") -> rawJson
+getDictionary(input: rawJson) -> response
+getDictionaryValue(input: response, key: "items") -> contentArr
+
+for item in contentArr {
+    getDictionaryValue(input: item, key: "text") -> rawBlockText
+    if rawBlockText != "" {
+        showResult(text: "ITER:\(rawBlockText)")
+    }
+}

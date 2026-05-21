@@ -1,0 +1,28 @@
+#name: Issue 12 VarType
+#icon: bug
+#color: red
+
+// Exercises the variable-typed-parameter path: `getDictionaryValue(input: item, ...)`
+// where `item` is a for-each iterator. The `input` param has type "variable", so
+// it compiles to WFTextTokenAttachment with a direct reference (not string
+// interpolation). Bug: that reference emits Type:Variable + VariableName:"Repeat
+// Item", which Shortcuts can't resolve, so rawBlockText is always "".
+//
+// Expected: FINAL=third
+// Buggy:    FINAL=  (rawBlockText empty, var assignment never reaches outer scope)
+
+text(text: "") -> emptySeed
+var assistantText = emptySeed
+
+text(text: "{\"items\":[{\"text\":\"first\"},{\"text\":\"second\"},{\"text\":\"third\"}]}") -> rawJson
+getDictionary(input: rawJson) -> response
+getDictionaryValue(input: response, key: "items") -> contentArr
+
+for item in contentArr {
+    getDictionaryValue(input: item, key: "text") -> rawBlockText
+    if rawBlockText != "" {
+        var assistantText = rawBlockText
+    }
+}
+
+showResult(text: "FINAL=\(assistantText)")

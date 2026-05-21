@@ -1,0 +1,27 @@
+#name: Issue 12 File Coerce
+#icon: bug
+#color: red
+
+// Repro B: contentArr originates from a downloadURL response (File-coerced
+// to string by getDictionary's coerce hint), mirroring Shannon's path. If
+// this fails while the inline-text version succeeds, then File-coerced
+// JSON arrays don't iterate the same way as string-typed dictionary inputs.
+//
+// jsonplaceholder.typicode.com/posts returns an array of objects with
+// `title`/`body` keys — first three titles are deterministic across runs.
+
+downloadURL(url: "https://jsonplaceholder.typicode.com/posts") -> raw
+getDictionary(input: raw) -> response
+
+text(text: "") -> emptySeed
+var lastTitle = emptySeed
+var iterCount = emptySeed
+
+for item in response {
+    getDictionaryValue(input: item, key: "title") -> rawTitle
+    if rawTitle != "" {
+        var lastTitle = rawTitle
+    }
+}
+
+showResult(text: "FINAL=\(lastTitle)")

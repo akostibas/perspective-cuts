@@ -1,0 +1,28 @@
+#name: Issue 12 Conv Loop v4
+#icon: bug
+#color: red
+
+// Diagnostic markers to see exactly which branch fires.
+
+text(text: "end_turn") -> stopSeed
+var stopReason = stopSeed
+
+text(text: "") -> emptySeed
+var assistantText = emptySeed
+
+text(text: "first,second,third") -> raw
+splitText(text: raw, separator: ",") -> contentArr
+
+for item in contentArr {
+    text(text: "\(item)") -> rawBlockText
+    showResult(text: "ITER:\(rawBlockText)")
+    if rawBlockText != "" {
+        showResult(text: "OUTER-IF:\(rawBlockText)")
+        if stopReason != "pause_turn" {
+            showResult(text: "INNER-IF stopReason=\(stopReason) text=\(rawBlockText)")
+            var assistantText = rawBlockText
+        }
+    }
+}
+
+showResult(text: "POST-LOOP assistantText=\(assistantText)")

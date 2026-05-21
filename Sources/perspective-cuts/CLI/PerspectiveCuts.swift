@@ -56,6 +56,19 @@ struct Compile: ParsableCommand {
             ]
         ]
         var actions = (plist["WFWorkflowActions"] as? [[String: Any]]) ?? []
+
+        // Structural validation: catch unresolved variable references AT
+        // COMPILE TIME, where they show a source location, rather than
+        // silently resolving to empty string at Shortcuts runtime. Runs
+        // before the banner injection so the banner doesn't shift indices
+        // in error messages.
+        let diagnostics = CompiledWorkflowValidator.validate(actions)
+        if !diagnostics.isEmpty {
+            for diag in diagnostics {
+                FileHandle.standardError.write(Data("warning: \(diag.message)\n".utf8))
+            }
+        }
+
         actions.insert(banner, at: 0)
         plist["WFWorkflowActions"] = actions
 
