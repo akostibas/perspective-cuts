@@ -60,6 +60,13 @@ echo "==> compiling $SOURCE -> $COMPILED" >&2
 if shortcuts list | grep -Fxq "$SHORTCUT_NAME"; then
     echo "==> already installed: $SHORTCUT_NAME (skipping import)" >&2
 else
+    # Track whether Shortcuts.app was already running so we don't quit it
+    # out from under the user at the end.
+    SHORTCUTS_WAS_RUNNING=0
+    if pgrep -xq Shortcuts; then
+        SHORTCUTS_WAS_RUNNING=1
+    fi
+
     echo "==> installing $SHORTCUT_NAME via Shortcuts app + System Events" >&2
     open "$COMPILED"
 
@@ -93,7 +100,9 @@ OSA
         echo "  see docs/dev-workflow.md" >&2
         exit 1
     fi
-    osascript -e 'tell application "Shortcuts" to quit' 2>/dev/null || true
+    if [[ $SHORTCUTS_WAS_RUNNING -eq 0 ]]; then
+        osascript -e 'tell application "Shortcuts" to quit' 2>/dev/null || true
+    fi
 fi
 
 OUTPUT="${BUILD_DIR}/output.txt"
