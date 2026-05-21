@@ -457,7 +457,7 @@ func forEachLoop() throws {
     #expect(startParams["WFControlFlowMode"] as? Int == 0)
 }
 
-@Test("For-each loop variable resolves to Repeat Item")
+@Test("For-each loop variable emits canonical magic-variable form")
 func forEachVariableResolvesToRepeatItem() throws {
     let result = try compile("""
     getBattery() -> items
@@ -466,12 +466,23 @@ func forEachVariableResolvesToRepeatItem() throws {
     }
     """)
     let acts = actions(from: result)
+    // Repeat block start carries a UUID separate from GroupingIdentifier.
+    // The iterator's magic-variable refs bind to that UUID via OutputUUID.
+    let repeatStart = params(of: acts[1])
+    let repeatUUID = repeatStart["UUID"] as! String
+
     let showParams = params(of: acts[2])
     let text = showParams["Text"] as! [String: Any]
     let value = text["Value"] as! [String: Any]
     let attachments = value["attachmentsByRange"] as! [String: Any]
     let attachment = attachments["{0, 1}"] as! [String: Any]
-    #expect(attachment["VariableName"] as? String == "Repeat Item")
+    // Canonical shape: Type:ActionOutput with OutputUUID = repeat block's
+    // UUID, OutputName "Repeat Item". The older Type:Variable form rendered
+    // red in the Shortcuts UI and could fail to bind in variable-typed
+    // parameter contexts (issue #12).
+    #expect(attachment["Type"] as? String == "ActionOutput")
+    #expect(attachment["OutputName"] as? String == "Repeat Item")
+    #expect(attachment["OutputUUID"] as? String == repeatUUID)
 }
 
 // MARK: - Menu
