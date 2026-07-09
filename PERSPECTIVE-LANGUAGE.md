@@ -54,7 +54,7 @@ These go at the top of your file after the import.
 
 `#color: purple` sets the icon background. Options: red, orange, yellow, green, teal, lightBlue, blue, darkBlue, purple, pink, darkPink, gray.
 
-`#icon: compose` sets the icon glyph. Options: gear, compose, star, heart, bolt, globe, mic, music, play, camera, photo, film, mail, message, phone, clock, alarm, calendar, map, location, bookmark, tag, folder, doc, list, cart, bag, gift, lock, key, link, flag, bell, eye, hand, person, house, car, airplane, sun, moon, cloud, umbrella, flame, drop, leaf, paintbrush, pencil, scissors, wand, cube, download, upload, share, trash, magnifyingglass, robot.
+`#icon: compose` sets the icon glyph. Options: gear, compose, star, heart, bolt, globe, mic, music, play, camera, photo, film, mail, message, phone, clock, alarm, calendar, map, location, bookmark, tag, folder, doc, list, cart, bag, gift, lock, key, link, flag, bell, eye, hand, person, house, car, airplane, sun, moon, cloud, umbrella, flame, drop, leaf, paintbrush, pencil, scissors, wand, cube, download, upload, share, trash, magnifyingglass, robot, skull. Names without an exact Shortcuts glyph render the closest one (eye→glasses, leaf→pine tree, share→repost arrows, bag→handbag, film→filmstrip).
 
 `#name: My Shortcut` sets the display name. Supports multiple words and apostrophes.
 

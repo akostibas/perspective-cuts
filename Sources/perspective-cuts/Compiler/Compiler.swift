@@ -89,7 +89,7 @@ struct Compiler: Sendable {
         var actions: [[String: Any]] = []
         var shortcutName = "Perspective Shortcut"
         var iconColor = 463140863 // blue default
-        var iconGlyph = 59771 // gear default
+        var iconGlyph = 59743 // gear default
         var noInputBehavior: String? = nil
 
         for node in nodes {
@@ -853,28 +853,32 @@ struct Compiler: Sendable {
     }
 
     private func iconGlyphNumber(for name: String) -> Int {
+        // Real WFWorkflowIconGlyphNumber values (private-use codepoints in the
+        // Shortcuts glyph font). Names without an exact glyph map to the
+        // closest available one: eye→glasses, leaf→pine tree, share→repost
+        // arrows, bag→handbag, film→filmstrip.
         let glyphs: [String: Int] = [
-            "gear": 59771, "compose": 59772, "star": 59773,
-            "heart": 59774, "bolt": 59775, "globe": 59776,
-            "mic": 59777, "music": 59778, "play": 59779,
-            "camera": 59780, "photo": 59781, "film": 59782,
-            "mail": 59783, "message": 59784, "phone": 59785,
-            "clock": 59786, "alarm": 59787, "calendar": 59788,
-            "map": 59789, "location": 59790, "bookmark": 59791,
-            "tag": 59792, "folder": 59793, "doc": 59794,
-            "list": 59795, "cart": 59796, "bag": 59797,
-            "gift": 59798, "lock": 59799, "key": 59800,
-            "link": 59801, "flag": 59802, "bell": 59803,
-            "eye": 59804, "hand": 59805, "person": 59806,
-            "house": 59807, "car": 59808, "airplane": 59809,
-            "sun": 59810, "moon": 59811, "cloud": 59812,
-            "umbrella": 59813, "flame": 59814, "drop": 59815,
-            "leaf": 59816, "paintbrush": 59817, "pencil": 59818,
-            "scissors": 59819, "wand": 59820, "cube": 59821,
-            "download": 59822, "upload": 59823, "share": 59824,
-            "trash": 59825, "magnifyingglass": 59826,
-            "robot": 61566
+            "gear": 59743, "compose": 61514, "star": 59841,
+            "heart": 59754, "bolt": 59764, "globe": 59412,
+            "mic": 59780, "music": 59790, "play": 59508,
+            "camera": 59682, "photo": 59784, "film": 59733,
+            "mail": 59773, "message": 59779, "phone": 59814,
+            "clock": 59712, "alarm": 59649, "calendar": 59681,
+            "map": 61444, "location": 59769, "bookmark": 59670,
+            "tag": 59848, "folder": 59737, "doc": 59725,
+            "list": 59445, "cart": 59828, "bag": 59750,
+            "gift": 59744, "lock": 59770, "key": 59760,
+            "link": 59685, "flag": 59736, "bell": 59667,
+            "eye": 59745, "hand": 59751, "person": 59801,
+            "house": 59755, "car": 59452, "airplane": 59648,
+            "sun": 59845, "moon": 59782, "cloud": 59714,
+            "umbrella": 59861, "flame": 59734, "drop": 59866,
+            "leaf": 59731, "paintbrush": 59793, "pencil": 59798,
+            "scissors": 59824, "wand": 59511, "cube": 59721,
+            "download": 59693, "upload": 59708, "share": 59821,
+            "trash": 59859, "magnifyingglass": 59772,
+            "robot": 61566, "skull": 61569
         ]
-        return glyphs[name.lowercased()] ?? 59771
+        return glyphs[name.lowercased()] ?? 59743
     }
 }

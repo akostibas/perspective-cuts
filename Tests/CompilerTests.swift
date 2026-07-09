@@ -692,7 +692,14 @@ func metadataColor() throws {
 func metadataIcon() throws {
     let result = try compile("#icon: star")
     let icon = result["WFWorkflowIcon"] as! [String: Any]
-    #expect(icon["WFWorkflowIconGlyphNumber"] as? Int == 59773)
+    #expect(icon["WFWorkflowIconGlyphNumber"] as? Int == 59841)
+}
+
+@Test("Metadata #icon skull maps to real glyph")
+func metadataIconSkull() throws {
+    let result = try compile("#icon: skull")
+    let icon = result["WFWorkflowIcon"] as! [String: Any]
+    #expect(icon["WFWorkflowIconGlyphNumber"] as? Int == 61569)
 }
 
 @Test("Default shortcut name is 'Perspective Shortcut'")
