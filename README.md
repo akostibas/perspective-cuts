@@ -123,7 +123,6 @@ See [PERSPECTIVE-LANGUAGE.md](PERSPECTIVE-LANGUAGE.md) for the complete language
 
 This is experimental. 35 actions have been tested end-to-end. 167 have verified identifiers. The compiler works. The language works. But there are known limitations:
 
-- `if/else` does not correctly reference action output variables
 - `changeCase` cannot be used because `case` is a parser keyword
 - `getCurrentWeather` is iOS only
 - Some enum parameters need special handling (like `useModel` needing integer values)
@@ -138,6 +137,14 @@ See [SECURITY.md](SECURITY.md) for the security policy and how to report vulnera
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to contribute. This is experimental. I appreciate help but want to make sure contributions align with where the project is going.
+
+## AI Contributions Are Welcome
+
+AI-generated contributions are welcome here. You do not need to apologize for your tooling.
+
+We use AI on this project ourselves. The way we like to work is what we call partner coding. A human and an AI write code together, and a human reviews what comes out. If you have a basic understanding of what the code does and why, we are very happy to work with you on it. And honestly, even if you do not fully understand every line yet, we are still willing to review it with you. We believe in helping people learn how to code and in building a community around that, not gatekeeping based on how the keystrokes got typed.
+
+No PRs will be closed here for being AI-assisted. Bring them.
 
 ## Contributors
 

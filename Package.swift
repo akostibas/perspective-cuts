@@ -13,7 +13,7 @@ let package = Package(
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
-            resources: [.copy("Resources/actions.json")]
+            resources: [.process("Resources")]
         ),
         .testTarget(
             name: "perspective-cutsTests",

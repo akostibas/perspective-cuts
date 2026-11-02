@@ -30,6 +30,9 @@ struct Compile: ParsableCommand {
     @Flag(name: .long, help: "Install directly to Shortcuts app (bypasses import, preserves all enum values)")
     var install: Bool = false
 
+    @Flag(name: .long, help: "After signing, open the shortcut so Shortcuts.app imports/updates it")
+    var open: Bool = false
+
     func run() throws {
         let source = try readSource(file)
         let tokens = try Lexer(source: source).tokenize()
@@ -106,6 +109,14 @@ struct Compile: ParsableCommand {
             try FileManager.default.removeItem(at: outputURL)
             try FileManager.default.moveItem(at: signedURL, to: outputURL)
             FileHandle.standardError.write(Data("Compiled and signed: \(outputURL.path)\n".utf8))
+            if open {
+                let task = Process()
+                task.launchPath = "/usr/bin/open"
+                task.arguments = [outputURL.path]
+                try? task.run()
+                task.waitUntilExit()
+                FileHandle.standardError.write(Data("Opened in Shortcuts.app for import.\n".utf8))
+            }
         } else {
             FileHandle.standardError.write(Data("Compiled: \(outputURL.path)\n".utf8))
             FileHandle.standardError.write(Data("Note: Run with --sign to create an importable shortcut.\n".utf8))

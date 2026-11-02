@@ -141,6 +141,14 @@ struct Parser: Sendable {
                 valueParts.append(s)
                 pos += 1
                 continue
+            case .comma:
+                valueParts.append(",")
+                pos += 1
+                continue
+            case .boolLiteral(let b):
+                valueParts.append(b ? "true" : "false")
+                pos += 1
+                continue
             default:
                 break
             }
