@@ -851,28 +851,19 @@ struct Compiler: Sendable {
         case .numberLiteral(let n): return n == n.rounded() ? Int(n) : n
         case .boolLiteral(let b): return b
         case .variableReference(let name):
-            // A bare variable reference (the entire field is the variable, not
-            // text containing it) is serialised as WFTextTokenAttachment with
-            // the descriptor at the top of `Value`. This is the form
-            // Shortcuts.app uses when it draws a vertical connection line
-            // between two action boxes; using WFTextTokenString here causes
-            // the boxes to render disconnected even though the data flows.
+            // Text-typed params need WFTextTokenString: a bare WFTextTokenAttachment makes
+            // text.replace / format.date evaluate empty. "variable"-typed params get the attachment.
+            let attachment: [String: Any]
             if let ref = outputMap[name] {
-                return [
-                    "Value": [
-                        "OutputName": ref.name,
-                        "OutputUUID": ref.uuid,
-                        "Type": "ActionOutput"
-                    ],
-                    "WFSerializationType": "WFTextTokenAttachment"
-                ] as [String: Any]
+                attachment = ["OutputName": ref.name, "OutputUUID": ref.uuid, "Type": "ActionOutput"]
+            } else if Self.isShortcutInput(name) {
+                attachment = Self.extensionInputAttachment()
+            } else {
+                attachment = Self.variableReferenceDict(name: name, forEachVarRefs: forEachVarRefs)
             }
-            let attachment: [String: Any] = Self.isShortcutInput(name)
-                ? Self.extensionInputAttachment()
-                : Self.variableReferenceDict(name: name, forEachVarRefs: forEachVarRefs)
             return [
-                "Value": attachment,
-                "WFSerializationType": "WFTextTokenAttachment"
+                "Value": ["string": "\u{FFFC}", "attachmentsByRange": ["{0, 1}": attachment]],
+                "WFSerializationType": "WFTextTokenString"
             ] as [String: Any]
         case .interpolatedString(let parts):
             var text = ""

@@ -95,6 +95,15 @@ private func identifier(of action: [String: Any]) -> String {
 
 // MARK: - Variable References (existing tests, expanded)
 
+@Test("Bare variable in a string-typed param is a WFTextTokenString (attachment shape evaluates empty)")
+func bareVariableInStringParamIsTokenString() throws {
+    let acts = actions(from: try compile("getBattery() -> level\nshowResult(text: level)"))
+    let text = params(of: acts[1])["Text"] as? [String: Any]
+    #expect(text?["WFSerializationType"] as? String == "WFTextTokenString")
+    let ranges = (text?["Value"] as? [String: Any])?["attachmentsByRange"] as? [String: Any]
+    #expect((ranges?["{0, 1}"] as? [String: Any])?["Type"] as? String == "ActionOutput")
+}
+
 @Test("Declared variable references compile successfully")
 func declaredVariableCompiles() throws {
     let result = try compile("""
