@@ -291,7 +291,7 @@ func conditionCodes() throws {
         ("==", 4),
         ("!=", 5),
         (">", 2),
-        ("<", 3),
+        ("<", 0), // verified on-device: 3 is ">="
         ("contains", 99),
     ]
     for (op, code) in cases {
