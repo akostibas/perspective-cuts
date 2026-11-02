@@ -42,7 +42,10 @@ struct ActionRegistry: Sendable {
 
         // Try multiple locations for actions.json
         let candidates: [URL] = {
-            var urls: [URL] = []
+            var urls: [URL?] = []
+
+            // SwiftPM resource bundle when built from source.
+            urls.append(Bundle.module.url(forResource: "actions", withExtension: "json"))
 
             // Use _NSGetExecutablePath + realpath to find the true binary location.
             // CommandLine.arguments[0] is often a bare name like "perspective-cuts" when
@@ -61,11 +64,6 @@ struct ActionRegistry: Sendable {
                 return URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
             }()
 
-            // 1. SPM resource bundle (preferred — embedded at build time)
-            if let bundled = Bundle.module.url(forResource: "actions", withExtension: "json") {
-                urls.append(bundled)
-            }
-
             // 2. Next to executable (legacy / Homebrew)
             urls.append(execDir.appendingPathComponent("actions.json"))
 
@@ -80,7 +78,7 @@ struct ActionRegistry: Sendable {
                 urls.append(bundleURL)
             }
 
-            return urls
+            return urls.compactMap { $0 }
         }()
 
         var foundData: Data?

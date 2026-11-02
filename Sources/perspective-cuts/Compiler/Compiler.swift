@@ -33,7 +33,8 @@ struct Compiler: Sendable {
 
     /// Returns true when `name` refers to the Shortcut Input magic variable.
     private static func isShortcutInput(_ name: String) -> Bool {
-        name == shortcutInputName
+        // Upstream spells it "ShortcutInput"; accept both.
+        name == shortcutInputName || name == "ShortcutInput"
     }
 
     /// Builds the ExtensionInput attachment dict used wherever shortcutInput appears.
@@ -80,7 +81,7 @@ struct Compiler: Sendable {
 
     func compile(nodes: [ASTNode]) throws -> [String: Any] {
         var outputMap: [String: OutputRef] = [:]
-        var declaredVariables: Set<String> = [Self.shortcutInputName]
+        var declaredVariables: Set<String> = [Self.shortcutInputName, "ShortcutInput"]
         var forEachVarRefs: [String: String] = [:]
         return try compileWithOutputMap(nodes: nodes, outputMap: &outputMap, declaredVariables: &declaredVariables, forEachVarRefs: &forEachVarRefs)
     }
@@ -90,12 +91,23 @@ struct Compiler: Sendable {
         var shortcutName = "Perspective Shortcut"
         var iconColor = 463140863 // blue default
         var iconGlyph = 59743 // gear default
-        var noInputBehavior: String? = nil
+
+        // Workflow surface toggles. Defaults preserve historical behavior:
+        // widget + watch on, no quick action / share sheet / menu bar.
+        var widgetEnabled = true
+        var watchEnabled = true
+        var quickActionEnabled = false
+        var shareSheetEnabled = false
+        var menuBarEnabled = false
+        // nil means "not set" -> use the full default content-class list.
+        var explicitInputClasses: [String]? = nil
+        // nil means "not set" -> Shortcuts default ("Continue").
+        var noInputBehavior: [String: Any]? = nil
 
         for node in nodes {
             switch node {
             case .importStatement: break // handled at validation
-            case .metadata(let key, let value, _):
+            case .metadata(let key, let value, let loc):
                 if key == "color", let color = registry.iconColors[value] {
                     iconColor = color
                 }
@@ -106,8 +118,26 @@ struct Compiler: Sendable {
                 if key == "name" {
                     shortcutName = value
                 }
-                if key == "noInputBehavior" {
-                    noInputBehavior = value
+                if key == "noinput" || key == "noInputBehavior" {
+                    noInputBehavior = try parseNoInputDirective(value: value, location: loc)
+                }
+                if key == "input" {
+                    explicitInputClasses = try parseInputDirective(value: value, location: loc)
+                }
+                if key == "quickaction" {
+                    quickActionEnabled = parseBoolDirective(value)
+                }
+                if key == "sharesheet" {
+                    shareSheetEnabled = parseBoolDirective(value)
+                }
+                if key == "menubar" {
+                    menuBarEnabled = parseBoolDirective(value)
+                }
+                if key == "widget" {
+                    widgetEnabled = parseBoolDirective(value)
+                }
+                if key == "watch" {
+                    watchEnabled = parseBoolDirective(value)
                 }
             case .comment(let text, _):
                 actions.append(buildAction(
@@ -170,12 +200,16 @@ struct Compiler: Sendable {
                 declaredVariables.insert(name)
             case .actionCall(let name, let arguments, let output, let location):
                 let def = registry.actions[name]
-                // If action contains dots, treat as raw identifier (3rd party app action)
-                let isThirdParty = def == nil && name.contains(".")
+                // If action contains dots, treat as raw identifier. Apple's own
+                // `is.workflow.actions.*` namespace is built-in territory even
+                // when the action is not in the registry — only treat names
+                // outside that namespace as 3rd-party App Intent actions.
+                let isAppleBuiltinRaw = def == nil && name.hasPrefix("is.workflow.actions.")
+                let isThirdParty = def == nil && name.contains(".") && !isAppleBuiltinRaw
                 let identifier: String
                 if let def {
                     identifier = def.identifier
-                } else if isThirdParty {
+                } else if isThirdParty || isAppleBuiltinRaw {
                     identifier = name
                 } else {
                     var msg = "Unknown action: '\(name)'"
@@ -234,7 +268,17 @@ struct Compiler: Sendable {
                                 })?.value
                             }
 
-                            if let paramType = paramDef?.type, paramType == "enumInt",
+                            // For built-in actions, map friendly name to plist key.
+                            // We need the plist key BEFORE choosing the serialisation
+                            // strategy because some Apple plist keys (e.g.
+                            // WFVariableName) must always be plain strings,
+                            // even when the parameter type is the generic "string".
+                            let plistKey = paramDef?.key ?? label
+
+                            if def == nil, case .dictionaryLiteral = value {
+                                // Raw is.workflow.actions.* call: a dict literal is a verbatim entity.
+                                resolvedValue = try Self.plainDictionary(value)
+                            } else if let paramType = paramDef?.type, paramType == "enumInt",
                                let valueMap = paramDef?.valueMap,
                                case .stringLiteral(let s) = value,
                                let intVal = valueMap[s] {
@@ -313,12 +357,13 @@ struct Compiler: Sendable {
                                 // Form dictionary: variable references become file items (WFItemType 5),
                                 // strings become text items (WFItemType 0).
                                 resolvedValue = try buildFormDictionary(entries: entries, outputMap: outputMap, forEachVarRefs: forEachVarRefs)
+                            } else if Compiler.appleBuiltinPlainKeys.contains(plistKey) {
+                                // Apple plist keys that must be plain strings regardless of registry type.
+                                resolvedValue = try expressionToPlainValue(value, outputMap: outputMap, forEachVarRefs: forEachVarRefs)
                             } else {
                                 resolvedValue = try expressionToValueWithOutputMap(value, outputMap: outputMap, forEachVarRefs: forEachVarRefs)
                             }
 
-                            // For built-in actions, map friendly name to plist key
-                            let plistKey = paramDef?.key ?? label
                             params[plistKey] = resolvedValue
                             // runShortcut needs both WFWorkflowName and WFWorkflow
                             // for dynamic shortcut name resolution at runtime
@@ -514,41 +559,167 @@ struct Compiler: Sendable {
                 "WFWorkflowIconStartColor": iconColor,
                 "WFWorkflowIconGlyphNumber": iconGlyph
             ],
-            "WFWorkflowTypes": ["NCWidget", "WatchKit"],
-            "WFWorkflowInputContentItemClasses": [
-                "WFAppStoreAppContentItem",
-                "WFArticleContentItem",
-                "WFContactContentItem",
-                "WFDateContentItem",
-                "WFEmailAddressContentItem",
-                "WFGenericFileContentItem",
-                "WFImageContentItem",
-                "WFiTunesProductContentItem",
-                "WFLocationContentItem",
-                "WFDCMapsLinkContentItem",
-                "WFAVAssetContentItem",
-                "WFPDFContentItem",
-                "WFPhoneNumberContentItem",
-                "WFRichTextContentItem",
-                "WFSafariWebPageContentItem",
-                "WFStringContentItem",
-                "WFURLContentItem"
-            ],
+            "WFWorkflowTypes": buildWorkflowTypes(
+                widget: widgetEnabled,
+                watch: watchEnabled,
+                quickAction: quickActionEnabled,
+                shareSheet: shareSheetEnabled,
+                menuBar: menuBarEnabled
+            ),
+            "WFWorkflowInputContentItemClasses": explicitInputClasses ?? defaultInputContentClasses,
+            "WFWorkflowHasShortcutInputVariables": (shareSheetEnabled || quickActionEnabled),
             "WFWorkflowActions": actions,
             "WFWorkflowName": shortcutName
         ]
 
-        if let behavior = noInputBehavior {
-            let behaviorMap: [String: String] = [
-                "doNothing": "WFWorkflowNoInputBehaviorDoNothing",
-                "askForInput": "WFWorkflowNoInputBehaviorAskForInput",
-                "getClipboard": "WFWorkflowNoInputBehaviorGetClipboard",
-            ]
-            if let name = behaviorMap[behavior] {
-                result["WFWorkflowNoInputBehavior"] = ["Name": name, "Parameters": [:] as [String: Any]]
+        if let noInputBehavior {
+            result["WFWorkflowNoInputBehavior"] = noInputBehavior
+        }
+        return result
+    }
+
+    // For raw `is.workflow.actions.*` calls, these parameter labels are scalar
+    // settings (variable names, shell choice, script body, enum values) and
+    // must be emitted as plain strings — not wrapped in WFTextTokenString —
+    // so Shortcuts.app shows them correctly and writes them back unchanged.
+    private static let appleBuiltinPlainKeys: Set<String> = [
+        "WFVariableName",
+        "WFCommentActionText",
+        "Shell",
+        "InputMode",
+        "Script",
+        "WFTextActionText",
+        "WFNotificationActionTitle"
+    ]
+
+    private static let defaultInputContentClasses: [String] = [
+        "WFAppStoreAppContentItem",
+        "WFArticleContentItem",
+        "WFContactContentItem",
+        "WFDateContentItem",
+        "WFEmailAddressContentItem",
+        "WFGenericFileContentItem",
+        "WFImageContentItem",
+        "WFiTunesProductContentItem",
+        "WFLocationContentItem",
+        "WFDCMapsLinkContentItem",
+        "WFAVAssetContentItem",
+        "WFPDFContentItem",
+        "WFPhoneNumberContentItem",
+        "WFRichTextContentItem",
+        "WFSafariWebPageContentItem",
+        "WFStringContentItem",
+        "WFURLContentItem"
+    ]
+
+    private var defaultInputContentClasses: [String] { Compiler.defaultInputContentClasses }
+
+    private func buildWorkflowTypes(widget: Bool, watch: Bool, quickAction: Bool, shareSheet: Bool, menuBar: Bool) -> [String] {
+        var types: [String] = []
+        if widget { types.append("NCWidget") }
+        if watch { types.append("WatchKit") }
+        if quickAction { types.append("QuickActionsService") }
+        if shareSheet { types.append("ActionExtension") }
+        if menuBar { types.append("MenuBar") }
+        return types
+    }
+
+    private func parseBoolDirective(_ value: String) -> Bool {
+        let v = value.trimmingCharacters(in: .whitespaces).lowercased()
+        return v == "true" || v == "yes" || v == "1" || v == "on"
+    }
+
+    private func parseNoInputDirective(value: String, location: SourceLocation) throws -> [String: Any] {
+        // Accept either a single keyword ("ask", "clipboard", "continue",
+        // "cancel") or a two-word form for "ask" with a content type
+        // ("ask files", "ask images", "ask media", "ask url", "ask text",
+        // "ask contact", "ask date", "ask number"). The two-word form
+        // tells Shortcuts.app what picker to present when the user runs
+        // the shortcut with no input.
+        let parts = value.lowercased().split(whereSeparator: { ", :".contains($0) }).map(String.init).filter { !$0.isEmpty }
+        guard let head = parts.first else {
+            throw CompilerError(message: "Empty #noinput directive", location: location)
+        }
+        switch head {
+        case "continue", "donothing":
+            return ["Name": "WFWorkflowNoInputBehaviorContinueWithInput", "Parameters": [String: Any]()]
+        case "clipboard", "getclipboard":
+            return ["Name": "WFWorkflowNoInputBehaviorGetClipboard", "Parameters": [String: Any]()]
+        case "cancel":
+            return ["Name": "WFWorkflowNoInputBehaviorReturnToHomeScreen", "Parameters": [String: Any]()]
+        case "ask", "askforinput":
+            var parameters: [String: Any] = [:]
+            if parts.count > 1 {
+                let typeMap: [String: (String, String)] = [
+                    // input type token -> (ItemClass, WFPickingMode)
+                    "files": ("WFGenericFileContentItem", "Files"),
+                    "file": ("WFGenericFileContentItem", "Files"),
+                    "images": ("WFImageContentItem", "Photos"),
+                    "image": ("WFImageContentItem", "Photos"),
+                    "photos": ("WFImageContentItem", "Photos"),
+                    "media": ("WFAVAssetContentItem", "Media"),
+                    "video": ("WFAVAssetContentItem", "Media"),
+                    "url": ("WFURLContentItem", "URL"),
+                    "text": ("WFStringContentItem", "Text"),
+                    "string": ("WFStringContentItem", "Text"),
+                    "contact": ("WFContactContentItem", "Contact"),
+                    "date": ("WFDateContentItem", "Date"),
+                    "number": ("WFNumberContentItem", "Number")
+                ]
+                let token = parts[1]
+                guard let (itemClass, pickingMode) = typeMap[token] else {
+                    let valid = typeMap.keys.sorted().joined(separator: ", ")
+                    throw CompilerError(message: "Unknown ask type '\(token)' in #noinput. Valid: \(valid)", location: location)
+                }
+                parameters["ItemClass"] = itemClass
+                parameters["SerializedParameters"] = ["WFPickingMode": pickingMode]
+            }
+            return ["Name": "WFWorkflowNoInputBehaviorAskForInput", "Parameters": parameters]
+        default:
+            throw CompilerError(message: "Unknown #noinput value '\(value)'. Valid: continue, ask [type], clipboard, cancel", location: location)
+        }
+    }
+
+    private func parseInputDirective(value: String, location: SourceLocation) throws -> [String] {
+        let normalized = value.lowercased().split(whereSeparator: { ", ".contains($0) })
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        if normalized.isEmpty {
+            throw CompilerError(message: "#input directive needs at least one type (e.g. 'url', 'text', 'any', 'none')", location: location)
+        }
+        if normalized.contains("any") { return Compiler.defaultInputContentClasses }
+        if normalized.contains("none") { return [] }
+
+        let mapping: [String: [String]] = [
+            "url": ["WFURLContentItem", "WFSafariWebPageContentItem"],
+            "text": ["WFStringContentItem", "WFRichTextContentItem"],
+            "string": ["WFStringContentItem"],
+            "richtext": ["WFRichTextContentItem"],
+            "image": ["WFImageContentItem"],
+            "file": ["WFGenericFileContentItem", "WFPDFContentItem"],
+            "pdf": ["WFPDFContentItem"],
+            "media": ["WFAVAssetContentItem"],
+            "contact": ["WFContactContentItem"],
+            "location": ["WFLocationContentItem", "WFDCMapsLinkContentItem"],
+            "date": ["WFDateContentItem"],
+            "email": ["WFEmailAddressContentItem"],
+            "phone": ["WFPhoneNumberContentItem"],
+            "app": ["WFAppStoreAppContentItem", "WFiTunesProductContentItem"],
+            "article": ["WFArticleContentItem"]
+        ]
+
+        var result: [String] = []
+        var seen = Set<String>()
+        for token in normalized {
+            guard let classes = mapping[token] else {
+                let valid = mapping.keys.sorted().joined(separator: ", ")
+                throw CompilerError(message: "Unknown #input type '\(token)'. Valid: any, none, \(valid)", location: location)
+            }
+            for cls in classes where !seen.contains(cls) {
+                seen.insert(cls)
+                result.append(cls)
             }
         }
-
         return result
     }
 
@@ -680,33 +851,28 @@ struct Compiler: Sendable {
         case .numberLiteral(let n): return n == n.rounded() ? Int(n) : n
         case .boolLiteral(let b): return b
         case .variableReference(let name):
-            // Use WFTextTokenString with attachmentsByRange -- this is how Apple's own shortcuts pass variables
+            // A bare variable reference (the entire field is the variable, not
+            // text containing it) is serialised as WFTextTokenAttachment with
+            // the descriptor at the top of `Value`. This is the form
+            // Shortcuts.app uses when it draws a vertical connection line
+            // between two action boxes; using WFTextTokenString here causes
+            // the boxes to render disconnected even though the data flows.
             if let ref = outputMap[name] {
                 return [
                     "Value": [
-                        "string": "\u{FFFC}",
-                        "attachmentsByRange": [
-                            "{0, 1}": [
-                                "OutputName": ref.name,
-                                "OutputUUID": ref.uuid,
-                                "Type": "ActionOutput"
-                            ]
-                        ]
+                        "OutputName": ref.name,
+                        "OutputUUID": ref.uuid,
+                        "Type": "ActionOutput"
                     ],
-                    "WFSerializationType": "WFTextTokenString"
+                    "WFSerializationType": "WFTextTokenAttachment"
                 ] as [String: Any]
             }
             let attachment: [String: Any] = Self.isShortcutInput(name)
                 ? Self.extensionInputAttachment()
                 : Self.variableReferenceDict(name: name, forEachVarRefs: forEachVarRefs)
             return [
-                "Value": [
-                    "string": "\u{FFFC}",
-                    "attachmentsByRange": [
-                        "{0, 1}": attachment
-                    ]
-                ],
-                "WFSerializationType": "WFTextTokenString"
+                "Value": attachment,
+                "WFSerializationType": "WFTextTokenAttachment"
             ] as [String: Any]
         case .interpolatedString(let parts):
             var text = ""
@@ -885,7 +1051,10 @@ struct Compiler: Sendable {
         // Real WFWorkflowIconGlyphNumber values (private-use codepoints in the
         // Shortcuts glyph font). Names without an exact glyph map to the
         // closest available one: eye→glasses, leaf→pine tree, share→repost
-        // arrows, bag→handbag, film→filmstrip.
+        // arrows, bag→handbag, film→filmstrip. A raw number (`#icon: 59693`) passes through.
+        if let n = Int(name.trimmingCharacters(in: .whitespaces)) {
+            return n
+        }
         let glyphs: [String: Int] = [
             "gear": 59743, "compose": 61514, "star": 59841,
             "heart": 59754, "bolt": 59764, "globe": 59412,

@@ -715,11 +715,11 @@ func defaultName() throws {
     #expect(result["WFWorkflowName"] as? String == "Perspective Shortcut")
 }
 
-@Test("Metadata #noInputBehavior: doNothing sets WFWorkflowNoInputBehavior")
+@Test("Metadata #noInputBehavior: doNothing aliases #noinput continue")
 func noInputBehaviorDoNothing() throws {
     let result = try compile("#noInputBehavior: doNothing")
     let behavior = result["WFWorkflowNoInputBehavior"] as? [String: Any]
-    #expect(behavior?["Name"] as? String == "WFWorkflowNoInputBehaviorDoNothing")
+    #expect(behavior?["Name"] as? String == "WFWorkflowNoInputBehaviorContinueWithInput")
 }
 
 @Test("Metadata #noInputBehavior: askForInput sets WFWorkflowNoInputBehavior")
