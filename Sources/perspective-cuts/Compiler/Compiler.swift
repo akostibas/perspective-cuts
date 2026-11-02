@@ -997,7 +997,7 @@ struct Compiler: Sendable {
             params["WFNumberValue"] = "\(try expressionToPlainValue(right, outputMap: outputMap, forEachVarRefs: forEachVarRefs))"
         case .lessThan(let left, let right):
             params["WFInput"] = try resolveInput(left, coercionClass: "WFNumberContentItem")
-            params["WFCondition"] = 3 // less than
+            params["WFCondition"] = 0 // less than (3 is "greater than or equal")
             params["WFNumberValue"] = "\(try expressionToPlainValue(right, outputMap: outputMap, forEachVarRefs: forEachVarRefs))"
         }
     }
