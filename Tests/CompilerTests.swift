@@ -55,6 +55,13 @@ private func testRegistry() -> ActionRegistry {
                     "input": ActionParameter(type: "variable", required: true, key: "WFInput", coerce: "string")
                 ]
             ),
+            "runShortcut": ActionDefinition(
+                identifier: "is.workflow.actions.runworkflow",
+                description: "Run another shortcut",
+                parameters: [
+                    "name": ActionParameter(type: "variable", required: true, key: "WFWorkflowName")
+                ]
+            ),
             "noCoerceSink": ActionDefinition(
                 identifier: "test.no.coerce.sink",
                 description: "Test action whose variable parameter has no coerce hint",
@@ -793,6 +800,25 @@ func forEachUndeclaredCollectionCompiles() throws {
     """)
     let acts = actions(from: result)
     #expect(acts.count == 3) // repeat.each(start), getBattery, repeat.each(end)
+}
+
+@Test("runShortcut with a literal name emits a workflow-reference dict")
+func runShortcutLiteralName() throws {
+    let p = params(of: actions(from: try compile(#"runShortcut(name: "Child")"#))[0])
+    #expect(p["WFWorkflowName"] as? String == "Child")
+    let wf = p["WFWorkflow"] as? [String: Any]
+    #expect(wf?["workflowName"] as? String == "Child")
+    #expect(wf?["isSelf"] as? Bool == false)
+}
+
+@Test("Raw identifier passes a dict literal through as a plain nested dict")
+func rawIdentifierDictLiteralIsVerbatim() throws {
+    let p = params(of: actions(from: try compile(#"""
+    is.workflow.actions.vpn.set(WFVPN: {"title": "Tailscale", "appDescriptor": {"Name": "Tailscale"}})
+    """#))[0])
+    let vpn = p["WFVPN"] as? [String: Any]
+    #expect(vpn?["title"] as? String == "Tailscale")
+    #expect((vpn?["appDescriptor"] as? [String: Any])?["Name"] as? String == "Tailscale")
 }
 
 // MARK: - Plist Structure

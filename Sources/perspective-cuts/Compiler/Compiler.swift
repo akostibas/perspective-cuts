@@ -204,7 +204,10 @@ struct Compiler: Sendable {
                         if isThirdParty {
                             // 3rd-party App Intent action — use ToolKit type info
                             let tkParam = toolKitParams?[label]
-                            if tkParam?.isDynamicEntity == true || tkParam?.typeKind == 2 {
+                            if case .dictionaryLiteral = value {
+                                // A literal dict is a verbatim entity (e.g. a device-specific VPN copied from a real shortcut).
+                                resolvedValue = try Self.plainDictionary(value)
+                            } else if tkParam?.isDynamicEntity == true || tkParam?.typeKind == 2 {
                                 // Dynamic entity: wrap as { value, title, subtitle }
                                 let plainVal = try expressionToPlainValue(value, outputMap: outputMap, forEachVarRefs: forEachVarRefs)
                                 let strVal = "\(plainVal)"
@@ -320,7 +323,14 @@ struct Compiler: Sendable {
                             // runShortcut needs both WFWorkflowName and WFWorkflow
                             // for dynamic shortcut name resolution at runtime
                             if plistKey == "WFWorkflowName" {
-                                params["WFWorkflow"] = resolvedValue
+                                // A literal name must be a workflow-reference dict; a text
+                                // token here fails with "Make sure a valid shortcut is selected".
+                                if case .stringLiteral(let s) = value {
+                                    params["WFWorkflowName"] = s
+                                    params["WFWorkflow"] = ["workflowName": s, "isSelf": false] as [String: Any]
+                                } else {
+                                    params["WFWorkflow"] = resolvedValue
+                                }
                             }
                             continue
                         }
@@ -629,6 +639,25 @@ struct Compiler: Sendable {
             ],
             "WFSerializationType": "WFTextTokenAttachment"
         ]
+    }
+
+    static func plainDictionary(_ expr: Expression) throws -> Any {
+        switch expr {
+        case .stringLiteral(let s): return s
+        case .numberLiteral(let n): return n == n.rounded() ? Int(n) : n
+        case .boolLiteral(let b): return b
+        case .dictionaryLiteral(let entries):
+            var out: [String: Any] = [:]
+            for entry in entries {
+                guard case .stringLiteral(let k) = entry.key else {
+                    throw CompilerError(message: "Entity dictionary keys must be string literals", location: nil)
+                }
+                out[k] = try plainDictionary(entry.value)
+            }
+            return out
+        default:
+            throw CompilerError(message: "Entity dictionaries may only contain literals", location: nil)
+        }
     }
 
     private func expressionToPlainValue(_ expr: Expression, outputMap: [String: OutputRef] = [:], forEachVarRefs: [String: String] = [:]) throws -> Any {

@@ -1,0 +1,40 @@
+import Shortcuts
+#name: Tailnet Hung
+#icon: bolt
+#color: red
+
+// Labels a Tailscale hang for family-infra#310, then bounces the VPN.
+// No probes: any failed request aborts a shortcut on iOS (see issue #17).
+
+getCurrentDate() -> now
+formatDate(date: now, style: "Custom", format: "yyyy-MM-dd'T'HH:mm:ssxxx") -> noticedAt
+getWiFiNetwork() -> ssid
+var network = "cellular"
+if ssid != "" {
+    var network = "wifi:\(ssid)"
+}
+
+// WFVPN is copied from a hand-made shortcut on Alexi's iPhone; the identifier is device-specific.
+is.workflow.actions.vpn.set(
+  WFVPNOperation: {"value": "Disconnect", "title": {"key": "Disconnect"}, "subtitle": {"key": "Disconnect"}},
+  WFVPN: {
+    "appDescriptor": {"BundleIdentifier": "io.tailscale.ipn.ios", "Name": "Tailscale", "TeamIdentifier": "W5364U7YZB"},
+    "identifier": "13AB56DA-1297-43B8-B461-87C93D4E1723",
+    "serverAddress": "Tailscale Mesh",
+    "title": "Tailscale"
+  }
+)
+wait(seconds: 3)
+is.workflow.actions.vpn.set(
+  WFVPNOperation: {"value": "Connect", "title": {"key": "Connect"}, "subtitle": {"key": "Connect"}},
+  WFVPN: {
+    "appDescriptor": {"BundleIdentifier": "io.tailscale.ipn.ios", "Name": "Tailscale", "TeamIdentifier": "W5364U7YZB"},
+    "identifier": "13AB56DA-1297-43B8-B461-87C93D4E1723",
+    "serverAddress": "Tailscale Mesh",
+    "title": "Tailscale"
+  }
+)
+
+dictionary(items: {"noticed_at": noticedAt, "network": network, "bounced": true}) -> line
+appendToFile(input: "\(line)", filePath: "tailnet-hangs.jsonl", makeNewLine: true)
+notification(body: "Logged \(noticedAt) on \(network) · bounced", title: "Tailnet Hung")
